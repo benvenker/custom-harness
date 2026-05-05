@@ -3,7 +3,7 @@ import { AnthropicAgent, createSmithers } from 'smithers-orchestrator';
 import { runWorkflow } from '@smithers-orchestrator/engine';
 import { Effect } from 'effect';
 import { z } from 'zod';
-import type { Workflow, WorkflowNode } from '../planner.js';
+import type { Workflow, WorkflowNode } from '../types.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
