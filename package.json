@@ -7,7 +7,8 @@
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
     "test": "bun test tests/",
-    "typecheck": "bun tsc --noEmit"
+    "typecheck": "bun tsc --noEmit",
+    "probe:pi-agent": "bun scripts/probe-pi-agent.ts"
   },
   "dependencies": {
     "@flue/cli": "^0.3.10",

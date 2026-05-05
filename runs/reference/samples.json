@@ -1,0 +1,521 @@
+{
+  "audit": {
+    "goal": "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+    "path": "workflow",
+    "reason": "Multiple distinct phases — independent file scans then synthesis — benefits from durable checkpointing.",
+    "latency": "412ms",
+    "tokens": "1,287",
+    "runId": "a3f2-bb18-91c0",
+    "title": "Audit Pipeline",
+    "nodes": [
+      {
+        "id": "goal",
+        "type": "goal",
+        "title": "User goal",
+        "x": 380,
+        "y": 30,
+        "agent": "user",
+        "prompt": "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+        "tools": [],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:23:00",
+            "what": "submitted"
+          }
+        ]
+      },
+      {
+        "id": "plan",
+        "type": "planner",
+        "title": "Planner",
+        "x": 380,
+        "y": 230,
+        "agent": "generateObject · planSchema",
+        "prompt": "Classify the goal as harness (single-loop) or workflow (DAG). For workflow, define a tree of task / sequence / parallel nodes.",
+        "tools": [
+          "zod",
+          "generateObject"
+        ],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:23:00",
+            "tool": "generateObject",
+            "arg": "planSchema"
+          },
+          {
+            "ts": "14:23:01",
+            "what": "decision = workflow"
+          },
+          {
+            "ts": "14:23:01",
+            "what": "tree: sequence([parallel(scan-3), synthesize])"
+          }
+        ]
+      },
+      {
+        "id": "scan-1",
+        "type": "task",
+        "title": "Audit AGENTS.md",
+        "x": 80,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Read AGENTS.md. List outdated tool references, unclear constraints, and statements that no longer match the current code in src/.",
+        "tools": [
+          "read_file",
+          "bash"
+        ],
+        "status": "done",
+        "duration": "2.3s",
+        "timeline": [
+          {
+            "ts": "14:23:03",
+            "tool": "agent.init"
+          },
+          {
+            "ts": "14:23:04",
+            "tool": "read_file",
+            "arg": "AGENTS.md"
+          },
+          {
+            "ts": "14:23:05",
+            "tool": "bash",
+            "arg": "rg -l 'flue|smithers' src/"
+          },
+          {
+            "ts": "14:23:06",
+            "what": "output · 412 chars · ‘mentions outdated `done` tool semantics’"
+          },
+          {
+            "ts": "14:23:06",
+            "what": "checkpoint↓ smithers.db"
+          }
+        ]
+      },
+      {
+        "id": "scan-2",
+        "type": "task",
+        "title": "Audit README.md",
+        "x": 380,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Read README.md. Flag typos, drift from current behavior, and gaps in setup or usage instructions.",
+        "tools": [
+          "read_file"
+        ],
+        "status": "done",
+        "duration": "1.8s",
+        "timeline": [
+          {
+            "ts": "14:23:03",
+            "tool": "agent.init"
+          },
+          {
+            "ts": "14:23:04",
+            "tool": "read_file",
+            "arg": "README.md"
+          },
+          {
+            "ts": "14:23:07",
+            "what": "output · 287 chars · ‘intro paragraph has 4 typos’"
+          },
+          {
+            "ts": "14:23:07",
+            "what": "checkpoint↓ smithers.db"
+          }
+        ]
+      },
+      {
+        "id": "scan-3",
+        "type": "task",
+        "title": "Inventory deps",
+        "x": 680,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Read package.json. List dependencies with versions and any unused or out-of-date entries.",
+        "tools": [
+          "read_file",
+          "bash"
+        ],
+        "status": "running",
+        "timeline": [
+          {
+            "ts": "14:23:03",
+            "tool": "agent.init"
+          },
+          {
+            "ts": "14:23:04",
+            "tool": "read_file",
+            "arg": "package.json"
+          },
+          {
+            "ts": "14:23:08",
+            "tool": "bash",
+            "arg": "bun outdated"
+          }
+        ]
+      },
+      {
+        "id": "synth",
+        "type": "task",
+        "title": "Propose unified rewrite",
+        "x": 380,
+        "y": 720,
+        "agent": "worker · session.task",
+        "prompt": "Combine the three scan outputs into a single proposal. Produce a unified outline, a target voice, and a concrete diff plan listing files to update.",
+        "tools": [
+          "write_file"
+        ],
+        "status": "idle",
+        "timeline": [
+          {
+            "ts": "14:23:09",
+            "what": "queued · awaits scan-1, scan-2, scan-3"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "goal",
+        "to": "plan",
+        "label": ""
+      },
+      {
+        "from": "plan",
+        "to": "scan-1",
+        "label": "parallel"
+      },
+      {
+        "from": "plan",
+        "to": "scan-2",
+        "label": ""
+      },
+      {
+        "from": "plan",
+        "to": "scan-3",
+        "label": ""
+      },
+      {
+        "from": "scan-1",
+        "to": "synth",
+        "label": ""
+      },
+      {
+        "from": "scan-2",
+        "to": "synth",
+        "label": ""
+      },
+      {
+        "from": "scan-3",
+        "to": "synth",
+        "label": "barrier"
+      }
+    ],
+    "defaultSelected": "scan-1"
+  },
+  "checks": {
+    "goal": "Run typecheck, tests, and lint — then summarize.",
+    "path": "workflow",
+    "reason": "Three independent checks fan out in parallel, then converge into a summary task.",
+    "latency": "356ms",
+    "tokens": "1,041",
+    "runId": "e8d4-7711-0fa2",
+    "title": "Pre-commit Checks",
+    "nodes": [
+      {
+        "id": "goal",
+        "type": "goal",
+        "title": "User goal",
+        "x": 380,
+        "y": 30,
+        "agent": "user",
+        "prompt": "Run typecheck, tests, and lint — then summarize.",
+        "tools": [],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:42:00",
+            "what": "submitted"
+          }
+        ]
+      },
+      {
+        "id": "plan",
+        "type": "planner",
+        "title": "Planner",
+        "x": 380,
+        "y": 230,
+        "agent": "generateObject · planSchema",
+        "prompt": "Classify the goal. Three independent checks → parallel; followed by a summary → sequence.",
+        "tools": [
+          "generateObject"
+        ],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:42:00",
+            "tool": "generateObject",
+            "arg": "planSchema"
+          },
+          {
+            "ts": "14:42:01",
+            "what": "decision = workflow"
+          },
+          {
+            "ts": "14:42:01",
+            "what": "tree: sequence([parallel(typecheck, tests, lint), summarize])"
+          }
+        ]
+      },
+      {
+        "id": "tc",
+        "type": "task",
+        "title": "Typecheck",
+        "x": 80,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Run `bun tsc --noEmit` and report errors with file:line.",
+        "tools": [
+          "bash"
+        ],
+        "status": "done",
+        "duration": "3.1s",
+        "timeline": [
+          {
+            "ts": "14:42:01",
+            "tool": "bash",
+            "arg": "bun tsc --noEmit"
+          },
+          {
+            "ts": "14:42:04",
+            "what": "exit=0 · 0 errors"
+          }
+        ]
+      },
+      {
+        "id": "tt",
+        "type": "task",
+        "title": "Tests",
+        "x": 380,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Run `bun test tests/` and report pass / fail counts and any failing test names.",
+        "tools": [
+          "bash"
+        ],
+        "status": "done",
+        "duration": "4.2s",
+        "timeline": [
+          {
+            "ts": "14:42:01",
+            "tool": "bash",
+            "arg": "bun test tests/"
+          },
+          {
+            "ts": "14:42:05",
+            "what": "exit=0 · 14 passed"
+          }
+        ]
+      },
+      {
+        "id": "ln",
+        "type": "task",
+        "title": "Lint",
+        "x": 680,
+        "y": 480,
+        "agent": "worker · session.task",
+        "prompt": "Run lint over src/ and report any rule violations.",
+        "tools": [
+          "bash"
+        ],
+        "status": "running",
+        "timeline": [
+          {
+            "ts": "14:42:01",
+            "tool": "bash",
+            "arg": "bun eslint src"
+          }
+        ]
+      },
+      {
+        "id": "sum",
+        "type": "task",
+        "title": "Summarize",
+        "x": 380,
+        "y": 720,
+        "agent": "worker · session.task",
+        "prompt": "Read the three reports above. Produce a one-paragraph summary highlighting any blocking issues.",
+        "tools": [],
+        "status": "idle",
+        "timeline": [
+          {
+            "ts": "14:42:06",
+            "what": "queued · awaits all checks"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "goal",
+        "to": "plan",
+        "label": ""
+      },
+      {
+        "from": "plan",
+        "to": "tc",
+        "label": "parallel"
+      },
+      {
+        "from": "plan",
+        "to": "tt",
+        "label": ""
+      },
+      {
+        "from": "plan",
+        "to": "ln",
+        "label": ""
+      },
+      {
+        "from": "tc",
+        "to": "sum",
+        "label": ""
+      },
+      {
+        "from": "tt",
+        "to": "sum",
+        "label": ""
+      },
+      {
+        "from": "ln",
+        "to": "sum",
+        "label": "barrier"
+      }
+    ],
+    "defaultSelected": "ln"
+  },
+  "version": {
+    "goal": "Add a --version flag to the CLI.",
+    "path": "harness",
+    "reason": "Single, focused code change. One agent loop is sufficient.",
+    "latency": "287ms",
+    "tokens": "964",
+    "runId": "b7c1-04ee-2a55",
+    "title": "Single-loop Harness",
+    "nodes": [
+      {
+        "id": "goal",
+        "type": "goal",
+        "title": "User goal",
+        "x": 380,
+        "y": 30,
+        "agent": "user",
+        "prompt": "Add a --version flag to the CLI.",
+        "tools": [],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:31:08",
+            "what": "submitted"
+          }
+        ]
+      },
+      {
+        "id": "plan",
+        "type": "planner",
+        "title": "Planner",
+        "x": 380,
+        "y": 230,
+        "agent": "generateObject · planSchema",
+        "prompt": "Classify the goal. Tight, well-scoped change → harness path; spawn one Flue session and let it loop.",
+        "tools": [
+          "generateObject"
+        ],
+        "status": "done",
+        "timeline": [
+          {
+            "ts": "14:31:08",
+            "tool": "generateObject",
+            "arg": "planSchema"
+          },
+          {
+            "ts": "14:31:09",
+            "what": "decision = harness"
+          },
+          {
+            "ts": "14:31:09",
+            "what": "spawn: flue run worker --target node"
+          }
+        ],
+        "decision": "harness"
+      },
+      {
+        "id": "worker",
+        "type": "harness-worker",
+        "title": "Worker · session.task",
+        "x": 380,
+        "y": 480,
+        "agent": "flue · session(worker) · role=worker",
+        "prompt": "You are an expert at accomplishing goals. Read the goal, break into steps, execute, verify, then call done. Goal: Add a --version flag to the CLI.",
+        "tools": [
+          "read_file",
+          "write_file",
+          "bash",
+          "done"
+        ],
+        "status": "running",
+        "timeline": [
+          {
+            "ts": "14:31:09",
+            "tool": "agent.init",
+            "arg": "model=claude-sonnet-4-6"
+          },
+          {
+            "ts": "14:31:10",
+            "tool": "read_file",
+            "arg": "src/index.ts"
+          },
+          {
+            "ts": "14:31:11",
+            "tool": "read_file",
+            "arg": "package.json"
+          },
+          {
+            "ts": "14:31:13",
+            "tool": "write_file",
+            "arg": "src/index.ts (+9 −1)"
+          },
+          {
+            "ts": "14:31:14",
+            "tool": "bash",
+            "arg": "bun src/index.ts --version"
+          },
+          {
+            "ts": "14:31:14",
+            "what": "stdout = 0.1.0"
+          },
+          {
+            "ts": "14:31:15",
+            "tool": "done",
+            "arg": "added --version flag"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "goal",
+        "to": "plan",
+        "label": ""
+      },
+      {
+        "from": "plan",
+        "to": "worker",
+        "label": "harness"
+      }
+    ],
+    "defaultSelected": "worker"
+  }
+}

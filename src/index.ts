@@ -2,6 +2,7 @@ import { generateObject } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { runSmithersWorkflow } from './workflow/runner.js';
+import { createRunRecorder, type RunRecorder } from './runs/recorder.js';
 import type { Workflow } from './types.js';
 
 // --- Provider ---
@@ -54,19 +55,20 @@ When choosing "workflow", define a root WorkflowNode tree. Supported node types:
   parallel   { type, name?, children: WorkflowNode[] }`;
 
 async function plan(goal: string, context?: string) {
-  const { object } = await generateObject({
+  const result = await generateObject({
     model: openrouter()(MODEL),
     schema: planSchema,
     system: PLANNER_PROMPT,
     prompt: `Goal: ${goal}` + (context ? `\n\nContext: ${context}` : ''),
   });
-  return object;
+  return { output: result.object, usage: result.usage };
 }
 
 // --- Execution paths ---
 
-async function runHarness(goal: string, context?: string) {
+async function runHarness(goal: string, context: string | undefined, recorder: RunRecorder) {
   const fullGoal = goal + (context ? `\n\nAdditional context:\n${context}` : '');
+  recorder.event('agent.init', { nodeId: 'worker', model: MODEL, synthesized: false });
   const proc = Bun.spawn(
     [
       'node_modules/.bin/flue',
@@ -79,15 +81,62 @@ async function runHarness(goal: string, context?: string) {
       '--payload',
       JSON.stringify({ goal: fullGoal }),
     ],
-    { stdout: 'inherit', stderr: 'inherit', env: { ...process.env } },
+    { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } },
   );
-  return proc.exited;
+
+  await Promise.all([
+    pipeFlueStream(proc.stdout, recorder),
+    pipeFlueStream(proc.stderr, recorder),
+  ]);
+
+  const exitCode = await proc.exited;
+  recorder.event('agent.output', { nodeId: 'worker', artifact: 'artifacts/cli.log', synthesized: false });
+  if (exitCode === 0) {
+    recorder.event('task.done', { nodeId: 'worker', output: { exitCode }, synthesized: false });
+  } else {
+    recorder.event('run.error', { message: `Flue worker exited with ${exitCode}`, source: 'flue' });
+    throw new Error(`Flue worker exited with ${exitCode}`);
+  }
 }
 
-async function runWorkflow(goal: string, workflow: Workflow) {
+async function pipeFlueStream(stream: ReadableStream<Uint8Array> | null, recorder: RunRecorder) {
+  if (!stream) return;
+  const decoder = new TextDecoder();
+  let pending = '';
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true });
+    process.stdout.write(text);
+    recorder.appendCli(text);
+    pending += text;
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() ?? '';
+    for (const line of lines) parseFlueLine(line, recorder);
+  }
+  const tail = decoder.decode();
+  if (tail) {
+    process.stdout.write(tail);
+    recorder.appendCli(tail);
+    pending += tail;
+  }
+  if (pending) parseFlueLine(pending, recorder);
+}
+
+function parseFlueLine(line: string, recorder: RunRecorder) {
+  const match = line.match(/^\[flue\]\s+tool:(start|done|error)\s+(\S+)(?:\s+(.*))?$/);
+  if (!match) return;
+  const [, phase, name, arg] = match;
+  const suffix = phase === 'start' ? '' : `.${phase}`;
+  recorder.event(`tool.${name}${suffix}`, {
+    nodeId: 'worker',
+    arg: arg?.trim() || undefined,
+    synthesized: false,
+  });
+}
+
+async function runWorkflow(goal: string, workflow: Workflow, recorder: RunRecorder) {
   console.log(`--- Workflow Mode: ${workflow.name} ---`);
   console.log(`${workflow.description}\n`);
-  const output = await runSmithersWorkflow(goal, workflow);
+  const output = await runSmithersWorkflow(goal, workflow, recorder);
   console.log('\n--- Result ---');
   console.log(output);
 }
@@ -138,18 +187,45 @@ async function main() {
   if (context) console.log(`Context: ${context}`);
   console.log('');
 
-  console.log('Planning...');
-  const result = await plan(goal, context ?? undefined);
-  console.log(`Path: ${result.path} — ${result.reason}\n`);
+  const runId = crypto.randomUUID();
+  const recorder = createRunRecorder(runId, { goal, model: MODEL });
+  const runStartedAt = Date.now();
+  recorder.event('run.started', { goal });
 
-  if (result.path === 'harness') {
-    console.log('--- Harness Mode (Flue session.task) ---\n');
-    await runHarness(goal, context ?? undefined);
-  } else if (result.workflow) {
-    await runWorkflow(goal, result.workflow as Workflow);
-  } else {
-    console.error('Planner chose workflow but returned no workflow definition');
-    process.exit(1);
+  let result: Awaited<ReturnType<typeof plan>> | null = null;
+  try {
+    console.log('Planning...');
+    const planStartedAt = performance.now();
+    result = await plan(goal, context ?? undefined);
+    const plannerOutput = result.output;
+    const planningLatencyMs = Math.round(performance.now() - planStartedAt);
+    recorder.writePlan(plannerOutput, { planningLatencyMs, usage: result.usage });
+    recorder.event('plan.decision', {
+      path: plannerOutput.path,
+      reason: plannerOutput.reason,
+      rawPlan: plannerOutput,
+      usage: result.usage,
+    });
+    console.log(`Path: ${plannerOutput.path} — ${plannerOutput.reason}`);
+    console.log(`Run ID: ${runId}\n`);
+
+    if (plannerOutput.path === 'harness') {
+      console.log('--- Harness Mode (Flue session.task) ---\n');
+      await runHarness(goal, context ?? undefined, recorder);
+    } else if (plannerOutput.workflow) {
+      await runWorkflow(goal, plannerOutput.workflow as Workflow, recorder);
+    } else {
+      throw new Error('Planner chose workflow but returned no workflow definition');
+    }
+
+    recorder.event('run.done', { status: 'succeeded' });
+    recorder.finish('succeeded', { latencyMs: Date.now() - runStartedAt });
+    process.exit(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recorder.event('run.error', { message, source: result?.output.path ?? 'cli' });
+    recorder.finish('failed', { latencyMs: Date.now() - runStartedAt });
+    throw err;
   }
 }
 

@@ -132,13 +132,12 @@ describe('workflow DAG builder (Smithers)', () => {
 
   function buildWorkflow(plan: Workflow) {
     const tasks = collectTasks(plan.root);
-    const taskSchema = z.object({ result: z.string() });
-    const schemas = Object.fromEntries(tasks.map((name) => [name, taskSchema]));
-    const { Workflow, Task, Sequence, Parallel, smithers } = createSmithers(schemas);
+    const schemas = Object.fromEntries(tasks.map((name) => [name, z.object({ result: z.string() })]));
+    const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers(schemas);
     const components = { Task, Sequence, Parallel };
     return smithers((_ctx) =>
       React.createElement(Workflow, { name: plan.name },
-        buildElement(plan.root, components, MOCK_AGENT, schemas)),
+        buildElement(plan.root, components, MOCK_AGENT, outputs)),
     );
   }
 
