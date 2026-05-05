@@ -65,10 +65,9 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - name: Run workflow goal
+      - name: Run workflow goal and verify output
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          bun src/index.ts --goal "read package.json and AGENTS.md separately, then write a one-sentence summary of this project to /tmp/summary.txt"
-      - name: Verify output file was written
-        run: cat /tmp/summary.txt
+          bun src/index.ts --goal "read package.json and AGENTS.md separately, then produce a one-sentence summary of this project" | tee /tmp/summary.txt
+          grep -qE '\S' /tmp/summary.txt
