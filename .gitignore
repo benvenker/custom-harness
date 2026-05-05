@@ -1,6 +1,11 @@
 node_modules/
 dist/
 .harness/
+.smithers/
+.pi/
+web/
 .env
 *.db
+*.db-shm
+*.db-wal
 smithers.db*

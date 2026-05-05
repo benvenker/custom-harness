@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import React from 'react';
 import { OpenAIAgent, createSmithers } from 'smithers-orchestrator';
 import { runWorkflow } from '@smithers-orchestrator/engine';
@@ -7,6 +8,9 @@ import { createOpenAI } from '@ai-sdk/openai';
 import type { Workflow, WorkflowNode } from '../types.js';
 
 const OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-6';
+const HARNESS_STATE_DIR = '.harness/smithers';
+const SMITHERS_DB_PATH = `${HARNESS_STATE_DIR}/smithers.db`;
+const SMITHERS_LOG_DIR = `${HARNESS_STATE_DIR}/executions`;
 
 function makeAgent() {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -83,8 +87,9 @@ export async function runSmithersWorkflow(
   const taskSchema = z.object({ result: z.string() });
   const schemas = Object.fromEntries(tasks.map((t) => [t.name, taskSchema]));
 
+  mkdirSync(SMITHERS_LOG_DIR, { recursive: true });
   const { Workflow, Task, Sequence, Parallel, smithers } =
-    createSmithers(schemas);
+    createSmithers(schemas, { dbPath: SMITHERS_DB_PATH });
   const components = { Task, Sequence, Parallel };
 
   const workflow = smithers((_ctx) =>
@@ -104,6 +109,8 @@ export async function runSmithersWorkflow(
       input: { goal },
       runId,
       resume: false,
+      rootDir: process.cwd(),
+      logDir: SMITHERS_LOG_DIR,
     }),
   );
 
