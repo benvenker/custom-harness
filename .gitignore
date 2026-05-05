@@ -3,3 +3,4 @@ dist/
 .harness/
 .env
 *.db
+smithers.db*
