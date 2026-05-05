@@ -9,6 +9,8 @@ jobs:
   typecheck-and-unit:
     name: Type check + unit tests (no API key)
     runs-on: ubuntu-latest
+    outputs:
+      has-api-key: ${{ steps.check-key.outputs.has-key }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -24,12 +26,22 @@ jobs:
         run: ./node_modules/.bin/tsc --noEmit
       - name: Unit tests
         run: bun test tests/schema.test.ts
+      - name: Check API key availability
+        id: check-key
+        env:
+          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "has-key=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-key=false" >> $GITHUB_OUTPUT
+          fi
 
   e2e-harness:
     name: E2E harness path (Flue session.task)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
+    if: needs.typecheck-and-unit.outputs.has-api-key == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -46,7 +58,7 @@ jobs:
     name: E2E workflow path (Smithers DAG)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
+    if: needs.typecheck-and-unit.outputs.has-api-key == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
