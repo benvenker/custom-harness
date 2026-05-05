@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  typecheck-and-unit:
+    name: Type check + unit tests (no API key)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun tsc --noEmit
+      - run: bun test tests/schema.test.ts
+
+  e2e-harness:
+    name: E2E harness path (Flue session.task)
+    runs-on: ubuntu-latest
+    needs: typecheck-and-unit
+    if: github.secret_exists('OPENROUTER_API_KEY')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Run harness goal
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          bun src/index.ts --goal "list the files in the current directory and tell me how many TypeScript files there are"
+
+  e2e-workflow:
+    name: E2E workflow path (Smithers DAG)
+    runs-on: ubuntu-latest
+    needs: typecheck-and-unit
+    if: github.secret_exists('OPENROUTER_API_KEY')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Run workflow goal
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          bun src/index.ts --goal "read package.json and AGENTS.md separately, then write a one-sentence summary of this project to /tmp/summary.txt"
+      - name: Verify output file was written
+        run: cat /tmp/summary.txt

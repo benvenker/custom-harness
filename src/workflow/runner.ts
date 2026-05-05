@@ -1,11 +1,22 @@
 import React from 'react';
-import { AnthropicAgent, createSmithers } from 'smithers-orchestrator';
+import { OpenAIAgent, createSmithers } from 'smithers-orchestrator';
 import { runWorkflow } from '@smithers-orchestrator/engine';
 import { Effect } from 'effect';
 import { z } from 'zod';
+import { createOpenAI } from '@ai-sdk/openai';
 import type { Workflow, WorkflowNode } from '../types.js';
 
-const MODEL = 'claude-sonnet-4-6';
+const OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-5';
+
+function makeAgent() {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
+  const openrouter = createOpenAI({
+    baseURL: 'https://openrouter.ai/api/v1',
+    apiKey,
+  });
+  return new OpenAIAgent({ model: openrouter(OPENROUTER_MODEL) });
+}
 
 function collectTasks(node: WorkflowNode): Array<{ name: string }> {
   switch (node.type) {
@@ -66,7 +77,7 @@ export async function runSmithersWorkflow(
   goal: string,
   plan: Workflow,
 ): Promise<string> {
-  const agent = new AnthropicAgent({ model: MODEL });
+  const agent = makeAgent();
 
   const tasks = collectTasks(plan.root);
   const taskSchema = z.object({ result: z.string() });
