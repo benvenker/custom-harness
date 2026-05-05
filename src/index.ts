@@ -19,17 +19,27 @@ const MODEL = 'anthropic/claude-sonnet-4-6';
 
 // --- Planner (AI SDK generateObject — provider-agnostic structured output) ---
 
+// Concrete finite-depth schema for WorkflowNode — Claude rejects z.any() / {}
+// in structured output. Three levels of nesting covers all realistic plans.
+const taskNode = z.object({ type: z.literal('task'), name: z.string(), prompt: z.string() });
+const compositeL2 = z.object({
+  type: z.enum(['sequence', 'parallel']),
+  name: z.string().optional(),
+  children: z.array(taskNode),
+});
+const nodeL2 = z.union([taskNode, compositeL2]);
+const compositeL1 = z.object({
+  type: z.enum(['sequence', 'parallel']),
+  name: z.string().optional(),
+  children: z.array(nodeL2),
+});
+const workflowNodeSchema = z.union([taskNode, compositeL1]);
+
 const planSchema = z.object({
   path: z.enum(['harness', 'workflow']),
   reason: z.string(),
   workflow: z
-    .object({
-      name: z.string(),
-      description: z.string(),
-      // root is intentionally z.any() — recursive Zod types don't serialise
-      // cleanly to JSON Schema for generateObject; we validate shape at runtime
-      root: z.any(),
-    })
+    .object({ name: z.string(), description: z.string(), root: workflowNodeSchema })
     .optional(),
 });
 
