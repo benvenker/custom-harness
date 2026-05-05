@@ -1,14 +1,4 @@
-import { planExecution } from './router/planner.js';
-import { runHarness } from './harness/agent.js';
-import { runWorkflow } from './workflow/executor.js';
-import type { Goal } from './types.js';
-
-function parseArgs(args: string[]): {
-  goal: string | null;
-  context: string | null;
-  forcePath: 'harness' | 'workflow' | null;
-  help: boolean;
-} {
+function parseArgs(args: string[]) {
   const get = (flag: string) => {
     const i = args.indexOf(flag);
     return i !== -1 && args[i + 1] ? args[i + 1] : null;
@@ -16,33 +6,31 @@ function parseArgs(args: string[]): {
   return {
     goal: get('--goal'),
     context: get('--context'),
-    forcePath: get('--path') as 'harness' | 'workflow' | null,
     help: args.includes('--help') || args.includes('-h'),
   };
 }
 
 function printHelp() {
   console.log(`
-custom-harness — agent that decides how to execute your goals
+custom-harness — meta-harness combining Flue + Smithers
 
 USAGE
   bun src/index.ts --goal "<goal>"
 
-OPTIONS
-  --goal <text>            Goal for the agent to accomplish (required)
-  --context <text>         Additional context
-  --path harness|workflow  Skip planning; force an execution path
-  --help                   Show this message
+HOW IT WORKS
+  1. A Claude planner decides the execution path
+  2. Simple goals  → Flue session.task()  (inner agent loop)
+  3. Complex goals → Smithers workflow    (durable crash-resumable DAG)
 
-EXAMPLES
-  bun src/index.ts --goal "list all TypeScript files in this project"
-  bun src/index.ts --goal "analyze this codebase and write a SUMMARY.md" --path workflow
-  bun src/index.ts --goal "fix the bug in src/foo.ts" --context "the test in test/foo.test.ts is failing"
+OPTIONS
+  --goal <text>      Goal to accomplish (required)
+  --context <text>   Additional context for the goal
+  --help             Show this help
 `);
 }
 
 async function main() {
-  const { goal, context, forcePath, help } = parseArgs(process.argv.slice(2));
+  const { goal, context, help } = parseArgs(process.argv.slice(2));
 
   if (help) {
     printHelp();
@@ -53,63 +41,33 @@ async function main() {
     process.exit(1);
   }
 
-  const goalObj: Goal = { description: goal, context: context ?? undefined };
-
   console.log(`\nGoal: ${goal}`);
   if (context) console.log(`Context: ${context}`);
   console.log('');
 
-  let path: 'harness' | 'workflow';
-  let workflow = null;
+  const payload = JSON.stringify({ goal, context: context ?? undefined });
 
-  if (forcePath) {
-    path = forcePath;
-    console.log(`Execution path: ${path} (forced)\n`);
-    if (path === 'workflow') {
-      console.log('Generating workflow plan...');
-      const plan = await planExecution(goalObj);
-      if (plan.path !== 'workflow') {
-        console.log('Planner suggested harness — generating workflow anyway...');
-        const retried = await planExecution({
-          ...goalObj,
-          description: `[WORKFLOW REQUIRED] ${goalObj.description}`,
-        });
-        if (retried.path === 'workflow') workflow = retried.workflow;
-      } else {
-        workflow = plan.workflow;
-      }
-      console.log('');
-    }
-  } else {
-    console.log('Planning execution path...');
-    const plan = await planExecution(goalObj);
-    path = plan.path;
-    console.log(`Execution path: ${path}`);
-    console.log(`Reason: ${plan.reason}\n`);
-    if (plan.path === 'workflow') workflow = plan.workflow;
-  }
+  const proc = Bun.spawn(
+    [
+      'node_modules/.bin/flue',
+      'run',
+      'orchestrator',
+      '--target',
+      'node',
+      '--id',
+      crypto.randomUUID(),
+      '--payload',
+      payload,
+    ],
+    {
+      stdout: 'inherit',
+      stderr: 'inherit',
+      env: { ...process.env },
+    },
+  );
 
-  let result;
-
-  if (path === 'harness') {
-    console.log('--- Harness Mode ---');
-    result = await runHarness(goalObj);
-  } else if (workflow) {
-    console.log(`--- Workflow Mode: ${workflow.name} ---`);
-    console.log(`${workflow.description}\n`);
-    result = await runWorkflow(workflow, goal);
-  } else {
-    console.log('Could not generate workflow — falling back to harness.');
-    result = await runHarness(goalObj);
-  }
-
-  console.log('\n--- Result ---');
-  console.log(result.output);
-
-  if (!result.success) {
-    if (result.error) console.error(`\nError: ${result.error}`);
-    process.exit(1);
-  }
+  const exitCode = await proc.exited;
+  process.exit(exitCode ?? 0);
 }
 
 main().catch((err) => {
