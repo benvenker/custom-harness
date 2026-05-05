@@ -22,7 +22,7 @@ jobs:
     name: E2E harness path (Flue session.task)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: github.secret_exists('OPENROUTER_API_KEY')
+    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -39,7 +39,7 @@ jobs:
     name: E2E workflow path (Smithers DAG)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: github.secret_exists('OPENROUTER_API_KEY')
+    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
