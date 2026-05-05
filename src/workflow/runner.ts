@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { Workflow, WorkflowNode } from '../types.js';
 
-const OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-5';
+const OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-6';
 
 function makeAgent() {
   const apiKey = process.env.OPENROUTER_API_KEY;

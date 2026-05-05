@@ -6,7 +6,7 @@ export default async function ({
   env,
 }: FlueContext<{ goal: string }, { OPENROUTER_API_KEY?: string }>) {
   const agent = await init({
-    model: 'openai/anthropic/claude-sonnet-4-5',
+    model: 'openai/anthropic/claude-sonnet-4-6',
     sandbox: 'local',
     providers: {
       openai: {

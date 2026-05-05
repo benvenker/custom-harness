@@ -15,7 +15,7 @@ function openrouter() {
   });
 }
 
-const MODEL = 'anthropic/claude-sonnet-4-5';
+const MODEL = 'anthropic/claude-sonnet-4-6';
 
 // --- Planner (AI SDK generateObject — provider-agnostic structured output) ---
 
