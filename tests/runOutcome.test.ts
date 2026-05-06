@@ -184,6 +184,7 @@ describe('runOutcome', () => {
 
     expect(result.status).toBe('succeeded');
     expect(planJson.raw.path).toBe('workflow');
+    expect(planJson.graph.source).toEqual({ kind: 'smithers', frameNo: 0 });
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toEqual([
       'goal',
       'plan',
@@ -195,6 +196,9 @@ describe('runOutcome', () => {
     expect(String(executor.calls[1]?.prompt)).toContain('first output');
     expect(readFileSync(join(runDir, 'artifacts', 'first-step.txt'), 'utf8')).toContain('first output');
     expect(readFileSync(join(runDir, 'artifacts', 'second-step.inputs.json'), 'utf8')).toContain('first-step.txt');
+    const firstNode = planJson.graph.nodes.find((node: { id: string }) => node.id === 'first-step');
+    expect(firstNode?.outputArtifact).toBe('artifacts/first-step.txt');
+    expect(firstNode?.timeline.some((event: { what?: string }) => event.what === 'task done')).toBe(true);
 
     const dbPath = join(runDir, 'smithers', 'smithers.db');
     expect(existsSync(dbPath)).toBe(true);
@@ -240,6 +244,7 @@ describe('runOutcome', () => {
     const edges = planJson.graph.edges as Array<{ from: string; to: string; label?: string }>;
 
     expect(result.status).toBe('succeeded');
+    expect(planJson.graph.source).toEqual({ kind: 'smithers', frameNo: 0 });
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toContain('left-branch');
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toContain('right-branch');
     expect(edges).toContainEqual({ from: 'plan', to: 'left-branch', label: 'parallel' });

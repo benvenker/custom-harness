@@ -2,7 +2,9 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import React from 'react';
 import { CodexAgent, createSmithers } from 'smithers-orchestrator';
-import { runWorkflow as runSmithersWorkflow } from '@smithers-orchestrator/engine';
+import { renderFrame, runWorkflow as runSmithersWorkflow } from '@smithers-orchestrator/engine';
+import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
+import type { GraphSnapshot } from '@smithers-orchestrator/graph';
 import { Effect } from 'effect';
 import { RecordingAgent } from '../agents/recordingAgent.js';
 import { buildHarnessPrompt, buildPlannerPrompt, buildTaskPrompt, PLANNER_SYSTEM_PROMPT } from '../planning/prompts.js';
@@ -56,6 +58,7 @@ export type OutcomeWorkflowHandle = {
   logDir: string;
   close: () => void;
   getPlan: () => PlannerOutput | null;
+  renderGraphSnapshot: (input: Record<string, unknown>) => Promise<GraphSnapshot>;
 };
 
 export function createDefaultAgent(): AgentLike {
@@ -171,6 +174,16 @@ export function buildOutcomeWorkflow(args: {
       client?.close?.();
     },
     getPlan: () => currentPlan,
+    renderGraphSnapshot: async (input) => {
+      const ctx = new SmithersCtx({
+        runId: args.runId,
+        iteration: 0,
+        input,
+        outputs: {},
+        zodToKeyName: workflow.zodToKeyName,
+      });
+      return Effect.runPromise(renderFrame(workflow, ctx, { baseRootDir: process.cwd(), workflowPath: null }));
+    },
   };
 }
 

@@ -7,6 +7,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import type { GraphSnapshot } from '@smithers-orchestrator/graph';
+import { NODE_WIDTH, smithersSnapshotToRenderGraph, type RenderEdge, type RenderGraph, type RenderNode, type TimelineEvent } from './smithersGraph.js';
 import type { Workflow, WorkflowNode } from '../types.js';
 
 type RunPath = 'harness' | 'workflow';
@@ -16,6 +18,22 @@ type PlannerOutput = {
   path: RunPath;
   reason: string;
   workflow?: Workflow;
+};
+
+type PlanSummary = {
+  path: RunPath;
+  reason: string;
+};
+
+type SmithersRenderedPlan = {
+  path: 'workflow';
+  reason: string;
+  source: {
+    kind: 'smithers';
+    workflowPath: string;
+    input: Record<string, unknown>;
+    context?: string;
+  };
 };
 
 type RunTotals = {
@@ -44,52 +62,8 @@ type RunJson = {
   notes?: string;
 };
 
-type TimelineEvent = {
-  ts: string;
-  tool?: string;
-  arg?: string;
-  what?: string;
-};
-
-type RenderNode = {
-  id: string;
-  type: 'goal' | 'planner' | 'task' | 'harness-worker';
-  title: string;
-  x: number;
-  y: number;
-  agent: string;
-  prompt: string;
-  tools: string[];
-  status: RunStatus;
-  duration?: string;
-  decision?: RunPath;
-  outputArtifact?: string;
-  outputPreview?: string;
-  outputBytes?: number;
-  timeline: TimelineEvent[];
-};
-
-type RenderEdge = {
-  from: string;
-  to: string;
-  label?: string;
-};
-
-type RenderGraph = {
-  goal: string;
-  path: RunPath;
-  reason: string;
-  latency: string;
-  tokens: string;
-  runId: string;
-  title: string;
-  nodes: RenderNode[];
-  edges: RenderEdge[];
-  defaultSelected: string;
-};
-
 type PlanJson = {
-  raw: PlannerOutput;
+  raw: PlannerOutput | SmithersRenderedPlan;
   graph: RenderGraph;
   layout: {
     persisted: boolean;
@@ -120,7 +94,6 @@ type BaseEvent = {
 export type RunRecorder = ReturnType<typeof createRunRecorder>;
 
 const DEFAULT_RUNS_DIR = 'runs';
-const NODE_WIDTH = 280;
 const TASK_COLUMNS = [80, 380, 680];
 const GOAL_X = 380;
 const GOAL_Y = 30;
@@ -145,7 +118,7 @@ export function createRunRecorder(
   const eventsPath = join(runDir, 'events.jsonl');
   const started = new Date();
   let initialized = false;
-  let rawPlan: PlannerOutput | null = null;
+  let rawPlan: PlanSummary | null = null;
   let planJson: PlanJson | null = null;
   let planningLatencyMs: number | null = null;
   let totals: RunTotals = { latencyMs: null, tokens: null };
@@ -186,7 +159,7 @@ export function createRunRecorder(
     writeFileSync(planPath, `${JSON.stringify(planJson, null, 2)}\n`);
   }
 
-  function syncRunFromPlan(plan: PlannerOutput) {
+  function syncRunFromPlan(plan: PlanSummary) {
     currentRun = {
       ...currentRun,
       path: plan.path,
@@ -290,6 +263,73 @@ export function createRunRecorder(
       });
       writePlanJson();
     },
+    writeSmithersGraphSnapshot(snapshot: GraphSnapshot) {
+      ensureInitialized();
+      if (!rawPlan || !planJson) return;
+      const previousGraph = planJson.graph;
+      const graph = smithersSnapshotToRenderGraph({
+        snapshot,
+        runId,
+        goal: opts.goal,
+        path: rawPlan.path,
+        reason: rawPlan.reason,
+        planningLatencyMs,
+        tokens: totals.tokens,
+        submittedAt: started,
+      });
+      mergeRuntimeNodeState(graph, previousGraph);
+      planJson = {
+        ...planJson,
+        graph,
+      };
+      writePlanJson();
+    },
+    writeSmithersPlanSnapshot(
+      snapshot: GraphSnapshot,
+      options: {
+        reason: string;
+        workflowPath: string;
+        input: Record<string, unknown>;
+        context?: string;
+        planningLatencyMs?: number;
+        tokens?: number | null;
+      },
+    ) {
+      ensureInitialized();
+      const summary: PlanSummary = { path: 'workflow', reason: options.reason };
+      rawPlan = summary;
+      if (typeof options.planningLatencyMs === 'number') planningLatencyMs = options.planningLatencyMs;
+      if ('tokens' in options) totals = { ...totals, tokens: options.tokens ?? null };
+      syncRunFromPlan(summary);
+      planJson = {
+        raw: {
+          path: 'workflow',
+          reason: options.reason,
+          source: {
+            kind: 'smithers',
+            workflowPath: options.workflowPath,
+            input: options.input,
+            ...(options.context === undefined ? {} : { context: options.context }),
+          },
+        },
+        graph: smithersSnapshotToRenderGraph({
+          snapshot,
+          runId,
+          goal: opts.goal,
+          path: 'workflow',
+          reason: options.reason,
+          planningLatencyMs,
+          tokens: totals.tokens,
+          submittedAt: started,
+        }),
+        layout: {
+          persisted: true,
+          coordinateSystem: 'web/index.html canvas pixels',
+          nodeWidth: NODE_WIDTH,
+        },
+      };
+      writePlanJson();
+    },
     appendCli(text: string) {
       ensureInitialized();
       appendFileSync(cliLogPath, text);
@@ -372,7 +412,7 @@ function buildPlanJson(args: {
   tokens: number | null;
   submittedAt: Date;
 }): PlanJson {
-  const graph = buildGraph(args);
+  const graph = buildLegacyGraph(args);
   return {
     raw: args.plan,
     graph,
@@ -384,7 +424,7 @@ function buildPlanJson(args: {
   };
 }
 
-function buildGraph(args: {
+function buildLegacyGraph(args: {
   runId: string;
   goal: string;
   plan: PlannerOutput;
@@ -441,7 +481,7 @@ function buildGraph(args: {
     return finishGraph(args, nodes, edges, 'worker', 'Smithers CLI Task');
   }
 
-  const layout = layoutWorkflow(args.plan.workflow.root);
+  const layout = layoutLegacyPlannerWorkflow(args.plan.workflow.root);
   for (const node of layout.nodes) {
     nodes.push({
       id: node.id,
@@ -493,7 +533,23 @@ function finishGraph(
     nodes,
     edges,
     defaultSelected,
+    source: { kind: 'legacy-planner-workflow', note: 'Fallback used before a Smithers GraphSnapshot is available.' },
   };
+}
+
+function mergeRuntimeNodeState(next: RenderGraph, previous: RenderGraph) {
+  const previousById = new Map(previous.nodes.map((node) => [node.id, node]));
+  for (const node of next.nodes) {
+    const old = previousById.get(node.id);
+    if (!old) continue;
+    node.status = old.status;
+    node.duration = old.duration;
+    node.decision = old.decision ?? node.decision;
+    node.outputArtifact = old.outputArtifact;
+    node.outputPreview = old.outputPreview;
+    node.outputBytes = old.outputBytes;
+    node.timeline = old.timeline;
+  }
 }
 
 type LayoutTask = {
@@ -529,7 +585,7 @@ export function taskNodeIds(root: WorkflowNode): Map<string, string> {
   return ids;
 }
 
-function layoutWorkflow(root: WorkflowNode): LayoutResult {
+function layoutLegacyPlannerWorkflow(root: WorkflowNode): LayoutResult {
   const used = new Set<string>();
   const nodes: LayoutTask[] = [];
   const edges: RenderEdge[] = [];

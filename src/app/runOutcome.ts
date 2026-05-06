@@ -77,6 +77,8 @@ export async function runOutcome(options: RunOutcomeOptions): Promise<RunOutcome
       if (result.status !== 'finished') throw new Error(`Smithers workflow ended with status ${result.status}`);
       plannerOutput = plannerOutput ?? workflowHandle.getPlan();
       if (!plannerOutput) throw new Error('Smithers workflow finished without a planner output');
+      const frame = await workflowHandle.renderGraphSnapshot({ goal: options.goal, context: options.context ?? null });
+      recorder.writeSmithersGraphSnapshot(frame);
     } finally {
       workflowHandle.close();
     }
