@@ -362,6 +362,14 @@ export function emitSmithersEvent(args: {
       message: `Smithers node failed: ${nodeId ?? 'unknown'}`,
       source: 'smithers',
     });
+  } else if (event.type === 'NodeCancelled') {
+    args.recorder.event('run.error', {
+      nodeId,
+      message: `Smithers node cancelled: ${nodeId ?? 'unknown'}`,
+      source: 'smithers',
+    });
+  } else if (event.type === 'NodeOutput' && nodeId && typeof event.text === 'string') {
+    args.recorder.appendAgentOutput(nodeId, event.text);
   } else if (event.type === 'AgentEvent') {
     emitAgentCliEvent(event, args.recorder, nodeId);
   }

@@ -292,6 +292,100 @@
     outline: 2px solid var(--workflow);
     outline-offset: -1px;
   }
+  .fork-lineage {
+    background: transparent; border: 1px dashed var(--hair);
+    color: var(--workflow);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 8px; cursor: pointer;
+    flex-shrink: 0;
+  }
+  .fork-lineage[hidden] { display: none; }
+  .fork-lineage:hover { color: var(--ink); border-color: var(--ink); }
+  .fork-of[hidden] { display: none; }
+  .fork-of { color: var(--workflow); }
+  .fork-of-link {
+    background: transparent; border: none; padding: 0;
+    color: var(--workflow);
+    font: inherit;
+    text-transform: uppercase;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .fork-of-link:hover { color: var(--ink); }
+
+  /* Studio bar (top of inspector body when a Task on a real run is selected) */
+  .studio-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    margin-bottom: 14px;
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+  }
+  .studio-status {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .studio-status b { color: var(--workflow); font-weight: 500; }
+  .studio-run {
+    padding: 6px 12px;
+    font-size: 10.5px;
+  }
+  .studio-run:disabled { background: var(--bone-3); border-color: var(--hair); color: var(--muted); }
+  .studio-run:disabled:hover { background: var(--bone-3); border-color: var(--hair); color: var(--muted); }
+
+  /* Editable prompt textarea */
+  .prompt-edit {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    max-height: 260px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 14px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 50;
+    /* Long prompts scroll inside the textarea; keep that scroll from leaking
+       out into .insp-body and the canvas grid (root cause of the wheel jitter). */
+    resize: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+  }
+  .prompt-edit:focus {
+    outline: 2px solid var(--workflow);
+    outline-offset: -1px;
+  }
+  .prompt-edit.edited {
+    background: rgba(216,84,61,0.05);
+    border-color: var(--harness);
+  }
+  .edit-pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--harness);
+    color: var(--harness);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .prompt-reset {
+    background: transparent; border: none;
+    color: var(--harness);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; padding: 0;
+    text-decoration: underline;
+  }
+  .prompt-reset:hover { color: var(--ink); }
 
   /* provenance badge in plan strip */
   .prov {
@@ -414,6 +508,7 @@
     min-height: 0;
     min-width: 0;
     overflow: auto;
+    overscroll-behavior: contain;
   }
   .canvas-inner {
     position: relative;
@@ -483,6 +578,14 @@
   }
   .node.done .status { color: var(--ok); }
   .node.done .status::before { background: var(--ok); }
+  .node.failed .status { color: var(--harness); }
+  .node.failed .status::before { background: var(--harness); }
+  .node.failed { border-color: var(--harness); }
+  .node.failed .node-bar { background: rgba(216,84,61,0.18); }
+  .node.failed .node-bar i { width: 100%; background: var(--harness); animation: none; }
+  .node.failed.selected { box-shadow: 5px 5px 0 0 var(--harness), 6px 6px 0 1px var(--ink); }
+  .node.succeeded-with-unverified-change .status { color: var(--warn); }
+  .node.succeeded-with-unverified-change .status::before { background: var(--warn); }
 
   .node-body { padding: 10px 12px 12px; }
   .node-title {
@@ -621,6 +724,7 @@
 
   .insp-body {
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 16px 18px 24px;
     flex: 1 1 auto;
     min-height: 0;
@@ -858,6 +962,7 @@
       <div>plan latency <b id="planLatency">412ms</b></div>
       <div>plan tokens <b id="planTokens">1,287</b></div>
       <div>run id <b id="runId">a3f2-bb18-91c0</b></div>
+      <div class="fork-of" id="forkOfRow" hidden>fork of <button type="button" class="fork-of-link" id="forkOfLink"></button></div>
     </div>
   </section>
 
@@ -874,6 +979,7 @@
           <span class="swatch"><i style="border-color:var(--rule);background:var(--bone-2)"></i><span>planner</span></span>
           <span class="swatch"><i style="border-color:var(--workflow);background:rgba(29,60,255,0.1)"></i><span>task · running</span></span>
           <span class="swatch"><i style="border-color:var(--ok);background:rgba(44,122,63,0.12)"></i><span>done</span></span>
+          <span class="swatch"><i style="border-color:var(--harness);background:rgba(216,84,61,0.12)"></i><span>failed</span></span>
         </div>
       </div>
       <div class="canvas" id="canvas">
@@ -888,6 +994,7 @@
       <div class="inspector-runs empty" id="runsBar">
         <span class="inspector-runs-label">Runs</span>
         <select class="inspector-runs-select" id="runsSelect" aria-label="Select run"></select>
+        <button class="fork-lineage" id="forkLineage" hidden type="button" title="Open the parent run"></button>
       </div>
       <div class="inspector-content" id="inspectorContent">
         <!-- inspector content injected -->
@@ -1126,6 +1233,14 @@
   let currentSample = "audit";
   let selectedId = null;
   let currentRunId = null;
+  // currentRunMeta is null for demos. Real runs populate it from run.json + plan.raw.
+  let currentRunMeta = null;
+  // Per-run drafts of edited Task prompts. Keyed by runId, then by nodeId.
+  // Survives navigating away and coming back to the same run.
+  const promptDrafts = new Map();
+  // Per-run baselines (the prompt rendered by the .tsx for each node) so we can
+  // tell whether a textarea value is actually "edited" relative to the run.
+  const promptBaselines = new Map();
   let runRefreshTimer = null;
 
   const NODE_W = 280;
@@ -1167,6 +1282,8 @@
 
       const statusText = n.status === "done"    ? `done${n.duration ? " · " + n.duration : ""}` :
                          n.status === "running" ? "running"
+                       : n.status === "failed"  ? "failed"
+                       : n.status === "succeeded-with-unverified-change" ? "unverified"
                                                 : "pending";
 
       el.innerHTML = `
@@ -1367,9 +1484,80 @@
     }
   }
 
+  function isEditableTask(node) {
+    return node.type === "task"
+      && currentSample === "_live"
+      && currentRunMeta?.isSmithersWorkflow === true;
+  }
+
+  function getPromptBaseline(runId, nodeId) {
+    return promptBaselines.get(runId)?.get(nodeId);
+  }
+
+  function getPromptDraft(runId, nodeId) {
+    return promptDrafts.get(runId)?.get(nodeId);
+  }
+
+  function setPromptDraft(runId, nodeId, value) {
+    let perRun = promptDrafts.get(runId);
+    if (!perRun) {
+      perRun = new Map();
+      promptDrafts.set(runId, perRun);
+    }
+    perRun.set(nodeId, value);
+  }
+
+  function clearPromptDraft(runId, nodeId) {
+    promptDrafts.get(runId)?.delete(nodeId);
+  }
+
+  function pendingOverridesForRun(runId) {
+    const perRun = promptDrafts.get(runId);
+    if (!perRun) return {};
+    const baselines = promptBaselines.get(runId) ?? new Map();
+    const out = {};
+    for (const [nodeId, value] of perRun) {
+      if (value !== baselines.get(nodeId)) out[nodeId] = value;
+    }
+    return out;
+  }
+
+  function pendingOverrideCount(runId) {
+    return Object.keys(pendingOverridesForRun(runId)).length;
+  }
+
+  function captureInspectorScrollState() {
+    const body = inspector.querySelector(".insp-body");
+    const ta = inspector.querySelector("#promptEditArea");
+    return {
+      bodyScroll: body ? body.scrollTop : 0,
+      taScroll: ta ? ta.scrollTop : 0,
+      taSelStart: ta && document.activeElement === ta ? ta.selectionStart : null,
+      taSelEnd: ta && document.activeElement === ta ? ta.selectionEnd : null,
+      taFocused: ta ? document.activeElement === ta : false,
+    };
+  }
+
+  function restoreInspectorScrollState(state) {
+    if (!state) return;
+    const body = inspector.querySelector(".insp-body");
+    if (body) body.scrollTop = state.bodyScroll;
+    const ta = inspector.querySelector("#promptEditArea");
+    if (ta) {
+      ta.scrollTop = state.taScroll;
+      if (state.taFocused) {
+        ta.focus({ preventScroll: true });
+        if (state.taSelStart != null && state.taSelEnd != null) {
+          try { ta.setSelectionRange(state.taSelStart, state.taSelEnd); } catch {}
+        }
+      }
+    }
+  }
+
   function renderInspector() {
     const sample = SAMPLES[currentSample];
     const node   = sample.nodes.find(n => n.id === selectedId);
+    const prevScroll = captureInspectorScrollState();
     if (!node) {
       inspector.innerHTML = `
         <div class="empty-state">
@@ -1387,6 +1575,37 @@
 
     const tlRows = buildTimelineHtml(node.timeline, isHarness, node.id);
     const selectedAtRender = node.id;
+    const editable = isEditableTask(node);
+    const draft = editable ? getPromptDraft(currentRunId, node.id) : undefined;
+    const baseline = editable ? getPromptBaseline(currentRunId, node.id) ?? node.prompt : node.prompt;
+    const promptValue = draft !== undefined ? draft : baseline;
+    const isEditedHere = editable && draft !== undefined && draft !== baseline;
+    const pendingCount = editable ? pendingOverrideCount(currentRunId) : 0;
+    const studioBarHtml = editable
+      ? `<div class="studio-bar">
+          <span class="studio-status">${pendingCount === 0
+            ? "No edits"
+            : `<b>${pendingCount}</b> edit${pendingCount === 1 ? "" : "s"} pending`}</span>
+          <button class="btn studio-run" id="studioRunBtn"${pendingCount === 0 ? " disabled" : ""}>
+            Run with edits <span class="arrow">→</span>
+          </button>
+        </div>`
+      : "";
+
+    const promptFieldHtml = editable
+      ? `<div class="field">
+          <div class="lbl">
+            <span>Agent prompt${isEditedHere ? " · <span class='edit-pill'>edited</span>" : ""}</span>
+            ${draft !== undefined && draft !== baseline
+              ? `<button class="prompt-reset" id="promptResetBtn" title="Discard edits to this task">Reset</button>`
+              : ""}
+          </div>
+          <textarea class="val prompt-edit${isEditedHere ? " edited" : ""}" id="promptEditArea" rows="6" spellcheck="false">${escapeHtml(promptValue)}</textarea>
+        </div>`
+      : `<div class="field">
+          <div class="lbl">Agent prompt</div>
+          <div class="val prompt ${isHarness ? "harness" : ""}">${node.prompt}</div>
+        </div>`;
 
     inspector.innerHTML = `
       <div class="insp-head">
@@ -1398,10 +1617,8 @@
         <div class="insp-sub">id <b>${node.id}</b> · agent <b>${node.agent}</b>${node.duration ? ` · <b>${node.duration}</b>` : ""}</div>
       </div>
       <div class="insp-body">
-        <div class="field">
-          <div class="lbl">Agent prompt</div>
-          <div class="val prompt ${isHarness ? "harness" : ""}">${node.prompt}</div>
-        </div>
+        ${studioBarHtml}
+        ${promptFieldHtml}
         ${node.tools && node.tools.length ? `
           <div class="field">
             <div class="lbl">Tools available</div>
@@ -1429,7 +1646,103 @@
         expandedNodes.delete(b.dataset.node);
         renderInspector();
       }));
+
+    if (editable) {
+      const ta = inspector.querySelector("#promptEditArea");
+      if (ta) {
+        ta.addEventListener("input", () => {
+          // Track the live value; do NOT re-render mid-typing or we lose focus.
+          setPromptDraft(currentRunId, node.id, ta.value);
+          updateStudioBar();
+        });
+      }
+      const resetBtn = inspector.querySelector("#promptResetBtn");
+      resetBtn?.addEventListener("click", () => {
+        clearPromptDraft(currentRunId, node.id);
+        renderInspector();
+      });
+      const runBtn = inspector.querySelector("#studioRunBtn");
+      runBtn?.addEventListener("click", runWithEdits);
+    }
+
     hydrateNodeOutput(node, selectedAtRender);
+    // Polling can re-render the inspector while the user is mid-scroll/edit;
+    // preserve scroll positions and (if focused) the textarea cursor.
+    restoreInspectorScrollState(prevScroll);
+  }
+
+  function updateStudioBar() {
+    const bar = inspector.querySelector(".studio-bar");
+    if (!bar) return;
+    const count = pendingOverrideCount(currentRunId);
+    const status = bar.querySelector(".studio-status");
+    if (status) {
+      status.innerHTML = count === 0
+        ? "No edits"
+        : `<b>${count}</b> edit${count === 1 ? "" : "s"} pending`;
+    }
+    const runBtn = bar.querySelector("#studioRunBtn");
+    if (runBtn) runBtn.disabled = count === 0;
+    const ta = inspector.querySelector("#promptEditArea");
+    if (ta) {
+      const baseline = getPromptBaseline(currentRunId, selectedId) ?? "";
+      ta.classList.toggle("edited", ta.value !== baseline);
+    }
+  }
+
+  function renderForkLineage() {
+    const parent = currentRunMeta?.forkedFrom ?? null;
+
+    // Inspector-header badge (legacy spot, kept for visibility next to runs picker).
+    const inspBadge = document.getElementById("forkLineage");
+    if (inspBadge) {
+      if (!parent) {
+        inspBadge.hidden = true;
+        inspBadge.textContent = "";
+      } else {
+        inspBadge.hidden = false;
+        inspBadge.textContent = `← forked from ${shortId(parent)}`;
+        inspBadge.dataset.parent = parent;
+      }
+    }
+
+    // Plan-strip row (top of page, right by the new run id).
+    const row = document.getElementById("forkOfRow");
+    const link = document.getElementById("forkOfLink");
+    if (row && link) {
+      if (!parent) {
+        row.hidden = true;
+        link.textContent = "";
+        delete link.dataset.parent;
+      } else {
+        row.hidden = false;
+        link.textContent = shortId(parent);
+        link.dataset.parent = parent;
+      }
+    }
+  }
+
+  async function runWithEdits() {
+    if (!currentRunId) return;
+    const overrides = pendingOverridesForRun(currentRunId);
+    if (Object.keys(overrides).length === 0) return;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Forking ${shortId(currentRunId)} with ${Object.keys(overrides).length} edit(s)...`);
+    try {
+      const result = await postJson(`/api/runs/${encodeURIComponent(currentRunId)}/rerun`, {
+        promptOverrides: overrides,
+      });
+      setRunActionStatus(`Forked as ${shortId(result.runId)} · ${result.status}`,
+        result.status === "succeeded" ? "ok" : result.status === "failed" ? "error" : "");
+      // Drafts on the parent run are discarded once we land on the fork; the
+      // forked run.json now carries them as its baseline.
+      promptDrafts.delete(currentRunId);
+      await refreshRuns(result.runId);
+    } catch (err) {
+      setRunActionStatus(`Run with edits failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
   }
 
   function loadSample(key) {
@@ -1458,7 +1771,11 @@
     // edges depend on rendered node heights — rAF after layout
     requestAnimationFrame(() => renderEdges(s));
 
-    selectedId = s.defaultSelected;
+    // Preserve the user's current selection if it still exists in the new
+    // graph (e.g. across a silent poll refresh). Otherwise fall back to the
+    // graph's default selected node.
+    const stillExists = selectedId && s.nodes.some(n => n.id === selectedId);
+    if (!stillExists) selectedId = s.defaultSelected;
     renderInspector();
     [...canvasInner.querySelectorAll(".node")].forEach(n => {
       n.classList.toggle("selected", n.id === "node-" + selectedId);
@@ -1475,6 +1792,14 @@
     runActionStatus.textContent = message || "";
     runActionStatus.classList.toggle("error", kind === "error");
     runActionStatus.classList.toggle("ok", kind === "ok");
+  }
+
+  function runStatusKind(status) {
+    return status === "failed" || status === "error" || status === "cancelled"
+      ? "error"
+      : status === "succeeded"
+        ? "ok"
+        : "";
   }
 
   function setRunButtonsBusy(isBusy) {
@@ -1494,9 +1819,15 @@
     }
     if (status !== "running") return;
     runRefreshTimer = setTimeout(() => {
-      if (currentRunId === runId) {
-        loadRun(runId, { silent: true, preserveStatus: true });
+      if (currentRunId !== runId) return;
+      // Don't tear down an active edit session for a background refresh.
+      // Reschedule and check again later.
+      const ta = inspector.querySelector("#promptEditArea");
+      if (ta && document.activeElement === ta) {
+        scheduleRunRefresh(runId, status);
+        return;
       }
+      loadRun(runId, { silent: true, preserveStatus: true });
     }, 3000);
   }
 
@@ -1613,10 +1944,32 @@
       }
 
       SAMPLES._live = graph;
+      // Capture per-run metadata the studio needs (workflow source + lineage).
+      const source = plan?.raw?.source ?? null;
+      const isSmithersWorkflow = source?.kind === "smithers";
+      currentRunMeta = {
+        id: runMeta.id,
+        forkedFrom: runMeta.forkedFrom ?? null,
+        isSmithersWorkflow,
+        workflowPath: isSmithersWorkflow ? source.workflowPath : null,
+        existingOverrides: isSmithersWorkflow ? (source.promptOverrides ?? {}) : {},
+      };
+      // Seed baselines so we can tell "edited vs original" for this run's tasks.
+      const baselines = new Map();
+      if (Array.isArray(graph.nodes)) {
+        for (const n of graph.nodes) {
+          if (n.type === "task" && typeof n.prompt === "string") baselines.set(n.id, n.prompt);
+        }
+      }
+      promptBaselines.set(runId, baselines);
+
       loadSample("_live");
       setProvenance(runMeta);
       setCurrentRunId(runId);
       if (!options.preserveStatus) setRunActionStatus("");
+      if (options.preserveStatus && runMeta.status && runMeta.status !== "running") {
+        setRunActionStatus(`Run ${shortId(runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
+      }
       scheduleRunRefresh(runId, runMeta.status);
 
       // update active button states
@@ -1624,6 +1977,7 @@
       if (runsSelect && [...runsSelect.options].some(o => o.value === runId)) {
         runsSelect.value = runId;
       }
+      renderForkLineage();
       return runMeta;
     } catch (err) {
       console.error("failed to load run", runId, err);
@@ -1691,7 +2045,7 @@
       const result = await postJson("/api/runs", { goal });
       setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`);
       const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runMeta.status === "failed" ? "error" : runMeta.status === "succeeded" ? "ok" : "");
+      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
     } catch (err) {
       setRunActionStatus(`Run failed · ${err.message}`, "error");
     } finally {
@@ -1707,14 +2061,23 @@
 
     const sourceRunId = currentRunId;
     setRunButtonsBusy(true);
-    setRunActionStatus(`Rerunning ${shortId(sourceRunId)}...`);
+    setRunActionStatus(`Forking ${shortId(sourceRunId)}...`);
     try {
       const result = await postJson(`/api/runs/${encodeURIComponent(sourceRunId)}/rerun`, {});
-      setRunActionStatus(`Reran as ${shortId(result.runId)} · ${result.status}`);
-      const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runMeta.status === "failed" ? "error" : runMeta.status === "succeeded" ? "ok" : "");
+      // Don't auto-switch the user onto the brand-new fork. A freshly-started
+      // fork has no events yet, so the DAG would render every previously-failed
+      // task as 'pending' — which looks like the parent's state regressed.
+      // Refresh the dropdown so the new id is selectable, and tell the user
+      // it's there.
+      await refreshRuns();
+      setRunActionStatus(`Forked as ${shortId(result.runId)} · open from Runs ▾`,
+        result.status === "failed" ? "error" : "ok");
     } catch (err) {
       setRunActionStatus(`Rerun failed · ${err.message}`, "error");
+      await refreshRuns();
+      if (currentRunId === sourceRunId) {
+        await loadRun(sourceRunId, { silent: true, preserveStatus: true });
+      }
     } finally {
       setRunButtonsBusy(false);
     }
@@ -1728,6 +2091,8 @@
     setCurrentRunId(null);
     setRunActionStatus("");
     if (runsSelect) runsSelect.value = "";
+    currentRunMeta = null;
+    renderForkLineage();
   }));
 
   planBtn.addEventListener("click", startRunFromGoal);
@@ -1735,6 +2100,15 @@
 
   runsSelect.addEventListener("change", () => {
     if (runsSelect.value) loadRun(runsSelect.value);
+  });
+
+  document.getElementById("forkLineage")?.addEventListener("click", (e) => {
+    const parent = e.currentTarget.dataset.parent;
+    if (parent) loadRun(parent);
+  });
+  document.getElementById("forkOfLink")?.addEventListener("click", (e) => {
+    const parent = e.currentTarget.dataset.parent;
+    if (parent) loadRun(parent);
   });
 
   resetBtn.addEventListener("click", () => loadSample(currentSample));

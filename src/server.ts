@@ -1,15 +1,22 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { runOutcome, type RunOutcomeOptions, type RunOutcomeResult } from './app/runOutcome.js';
+import {
+  runSmithersWorkflow,
+  type RunSmithersWorkflowOptions,
+  type RunSmithersWorkflowResult,
+} from './app/runSmithersWorkflow.js';
 import { depsFromEnv } from './cli.js';
 import { planSchema, type PlannerOutput } from './planning/schema.js';
 
 type RunOutcomeFn = (options: RunOutcomeOptions) => Promise<RunOutcomeResult>;
+type RunSmithersWorkflowFn = (options: RunSmithersWorkflowOptions) => Promise<RunSmithersWorkflowResult>;
 
 export type HarnessServerOptions = {
   rootDir?: string;
   runsDir?: string;
   runOutcome?: RunOutcomeFn;
+  runSmithersWorkflow?: RunSmithersWorkflowFn;
 };
 
 type RunJson = {
@@ -21,10 +28,23 @@ type PlanJson = {
   raw: unknown;
 };
 
+type SmithersGraphExportPlan = {
+  path?: unknown;
+  reason?: unknown;
+  source: {
+    kind: 'smithers';
+    workflowPath: string;
+    input: Record<string, unknown>;
+    context?: string;
+    promptOverrides?: Record<string, string>;
+  };
+};
+
 export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
   const rootDir = resolve(options.rootDir ?? process.cwd());
   const runsDir = options.runsDir ?? process.env.CUSTOM_HARNESS_RUNS_DIR ?? 'runs';
   const runOutcomeFn = options.runOutcome ?? runOutcome;
+  const runSmithersWorkflowFn = options.runSmithersWorkflow ?? runSmithersWorkflow;
 
   return async function handle(request: Request): Promise<Response> {
     try {
@@ -39,6 +59,7 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
           request,
           runsDir,
           runOutcome: runOutcomeFn,
+          runSmithersWorkflow: runSmithersWorkflowFn,
         });
       }
 
@@ -64,14 +85,45 @@ async function rerunRun(args: {
   request: Request;
   runsDir: string;
   runOutcome: RunOutcomeFn;
+  runSmithersWorkflow: RunSmithersWorkflowFn;
 }) {
   const body = await readJsonBody(args.request);
   const existing = readExistingRun(args.runsDir, args.runId);
   const runId = typeof body.runId === 'string' ? body.runId : crypto.randomUUID();
+  const promptOverrides = parsePromptOverrides(body.promptOverrides);
+  if (isSmithersGraphExportPlan(existing.rawPlan)) {
+    const context = typeof body.context === 'string'
+      ? body.context
+      : existing.rawPlan.source.context;
+    const inheritedOverrides = existing.rawPlan.source.promptOverrides;
+    const mergedOverrides = mergeOverrides(inheritedOverrides, promptOverrides);
+    launchSmithersRun(args.runSmithersWorkflow, {
+      workflowPath: existing.rawPlan.source.workflowPath,
+      input: existing.rawPlan.source.input,
+      goal: existing.run.goal,
+      ...(context === undefined ? {} : { context }),
+      ...(mergedOverrides === undefined ? {} : { promptOverrides: mergedOverrides }),
+      forkedFrom: args.runId,
+      runId,
+      runsDir: args.runsDir,
+    });
+    return json({
+      ok: true,
+      runId,
+      status: 'running',
+      path: 'workflow',
+      forkedFrom: args.runId,
+    }, 202);
+  }
+
+  if (promptOverrides !== undefined) {
+    return json({ ok: false, error: 'promptOverrides are only supported for Smithers workflow runs' }, 400);
+  }
+  const plan = planSchema.parse(existing.rawPlan);
   launchRun(args.runOutcome, {
     goal: existing.run.goal,
     context: typeof body.context === 'string' ? body.context : undefined,
-    planner: () => existing.plan,
+    planner: () => plan,
     executorAgent: depsFromEnv().executorAgent,
     runId,
     runsDir: args.runsDir,
@@ -80,8 +132,29 @@ async function rerunRun(args: {
     ok: true,
     runId,
     status: 'running',
-    path: existing.plan.path,
+    path: plan.path,
   }, 202);
+}
+
+function parsePromptOverrides(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new Error('promptOverrides must be a JSON object of string→string');
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== 'string') throw new Error(`promptOverrides[${key}] must be a string`);
+    if (!key.trim()) continue;
+    if (raw.trim()) out[key] = raw;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function mergeOverrides(
+  inherited: Record<string, string> | undefined,
+  next: Record<string, string> | undefined,
+) {
+  if (!inherited && !next) return undefined;
+  const merged = { ...(inherited ?? {}), ...(next ?? {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 async function startRun(args: {
@@ -120,7 +193,14 @@ function launchRun(runOutcomeFn: RunOutcomeFn, options: RunOutcomeOptions) {
   });
 }
 
-function readExistingRun(runsDir: string, runId: string): { run: RunJson; plan: PlannerOutput } {
+function launchSmithersRun(runSmithersWorkflowFn: RunSmithersWorkflowFn, options: RunSmithersWorkflowOptions) {
+  void runSmithersWorkflowFn(options).catch((error) => {
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    console.error(`background Smithers workflow rerun failed before recorder could finish: ${message}`);
+  });
+}
+
+function readExistingRun(runsDir: string, runId: string): { run: RunJson; rawPlan: unknown } {
   const safeRunId = safeSegment(runId);
   const runDir = join(runsDir, safeRunId);
   const runPath = join(runDir, 'run.json');
@@ -131,7 +211,32 @@ function readExistingRun(runsDir: string, runId: string): { run: RunJson; plan: 
   const run = JSON.parse(readFileSync(runPath, 'utf8')) as RunJson;
   const planJson = JSON.parse(readFileSync(planPath, 'utf8')) as PlanJson;
   if (typeof run.goal !== 'string' || run.goal.trim() === '') throw new Error(`Run has no goal: ${runId}`);
-  return { run, plan: planSchema.parse(planJson.raw) };
+  return { run, rawPlan: planJson.raw };
+}
+
+function isSmithersGraphExportPlan(value: unknown): value is SmithersGraphExportPlan {
+  if (!value || typeof value !== 'object') return false;
+  const source = (value as { source?: unknown }).source;
+  if (!source || typeof source !== 'object') return false;
+  const maybeSource = source as Record<string, unknown>;
+  if (maybeSource.kind !== 'smithers'
+    || typeof maybeSource.workflowPath !== 'string'
+    || !isRecord(maybeSource.input)
+    || (maybeSource.context !== undefined && typeof maybeSource.context !== 'string')) {
+    return false;
+  }
+  const overrides = maybeSource.promptOverrides;
+  if (overrides !== undefined) {
+    if (!isRecord(overrides)) return false;
+    for (const v of Object.values(overrides)) {
+      if (typeof v !== 'string') return false;
+    }
+  }
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {

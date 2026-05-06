@@ -33,6 +33,7 @@ type SmithersRenderedPlan = {
     workflowPath: string;
     input: Record<string, unknown>;
     context?: string;
+    promptOverrides?: Record<string, string>;
   };
 };
 
@@ -60,6 +61,8 @@ type RunJson = {
   plan: { reason: string };
   sources?: { stdout?: string };
   notes?: string;
+  forkedFrom?: string;
+  overrides?: { promptOverrides?: Record<string, string> };
 };
 
 type PlanJson = {
@@ -79,6 +82,7 @@ type RunIndex = {
     path: RunPath;
     started: string;
     status: RunStatus;
+    forkedFrom?: string;
   }>;
 };
 
@@ -107,7 +111,7 @@ const PLANNER_PROMPT =
 export function createRunRecorder(
   runId: string,
   opts: { goal: string; model?: string },
-  options: { runsDir?: string } = {},
+  options: { runsDir?: string; forkedFrom?: string } = {},
 ) {
   const runsDir = options.runsDir ?? DEFAULT_RUNS_DIR;
   const indexPath = join(runsDir, 'index.json');
@@ -138,6 +142,7 @@ export function createRunRecorder(
     totals,
     plan: { reason: 'Planning not completed yet.' },
     sources: { stdout: 'artifacts/cli.log' },
+    ...(options.forkedFrom === undefined ? {} : { forkedFrom: options.forkedFrom }),
   };
 
   function ensureInitialized() {
@@ -291,6 +296,7 @@ export function createRunRecorder(
         workflowPath: string;
         input: Record<string, unknown>;
         context?: string;
+        promptOverrides?: Record<string, string>;
         planningLatencyMs?: number;
         tokens?: number | null;
       },
@@ -300,6 +306,12 @@ export function createRunRecorder(
       rawPlan = summary;
       if (typeof options.planningLatencyMs === 'number') planningLatencyMs = options.planningLatencyMs;
       if ('tokens' in options) totals = { ...totals, tokens: options.tokens ?? null };
+      if (options.promptOverrides && Object.keys(options.promptOverrides).length > 0) {
+        currentRun = {
+          ...currentRun,
+          overrides: { promptOverrides: { ...options.promptOverrides } },
+        };
+      }
       syncRunFromPlan(summary);
       planJson = {
         raw: {
@@ -310,6 +322,9 @@ export function createRunRecorder(
             workflowPath: options.workflowPath,
             input: options.input,
             ...(options.context === undefined ? {} : { context: options.context }),
+            ...(options.promptOverrides && Object.keys(options.promptOverrides).length > 0
+              ? { promptOverrides: { ...options.promptOverrides } }
+              : {}),
           },
         },
         graph: smithersSnapshotToRenderGraph({
@@ -700,12 +715,13 @@ function uniqueSlug(value: string, used: Set<string>) {
 function updateRunIndex(runsDir: string, indexPath: string, run: RunJson) {
   mkdirSync(runsDir, { recursive: true });
   const index = loadRunIndex(runsDir, indexPath);
-  const entry = {
+  const entry: RunIndex['runs'][number] = {
     id: run.id,
     goal: run.goal,
     path: run.path,
     started: run.started,
     status: run.status,
+    ...(run.forkedFrom === undefined ? {} : { forkedFrom: run.forkedFrom }),
   };
   const withoutCurrent = index.runs.filter((item) => item.id !== run.id);
   const runs = [entry, ...withoutCurrent].sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
@@ -740,6 +756,7 @@ function rebuildRunIndex(runsDir: string): RunIndex {
             path: run.path,
             started: run.started,
             status: run.status,
+            ...(run.forkedFrom === undefined ? {} : { forkedFrom: run.forkedFrom }),
           },
         ];
       } catch {
