@@ -1,7 +1,7 @@
 {
   "name": "custom-harness",
   "version": "0.1.0",
-  "description": "An agent harness combining Flue-style execution with Smithers-style durable workflows",
+  "description": "Smithers-first durable outcome runner with compatible harness/workflow artifacts",
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",

@@ -116,8 +116,7 @@ type BaseEvent = {
 
 export type RunRecorder = ReturnType<typeof createRunRecorder>;
 
-const RUNS_DIR = 'runs';
-const INDEX_PATH = join(RUNS_DIR, 'index.json');
+const DEFAULT_RUNS_DIR = 'runs';
 const NODE_WIDTH = 280;
 const TASK_COLUMNS = [80, 380, 680];
 const GOAL_X = 380;
@@ -132,8 +131,11 @@ const PLANNER_PROMPT =
 export function createRunRecorder(
   runId: string,
   opts: { goal: string; model?: string },
+  options: { runsDir?: string } = {},
 ) {
-  const runDir = join(RUNS_DIR, runId);
+  const runsDir = options.runsDir ?? DEFAULT_RUNS_DIR;
+  const indexPath = join(runsDir, 'index.json');
+  const runDir = join(runsDir, runId);
   const artifactsDir = join(runDir, 'artifacts');
   const cliLogPath = join(artifactsDir, 'cli.log');
   const planPath = join(runDir, 'plan.json');
@@ -166,7 +168,7 @@ export function createRunRecorder(
     if (initialized) return;
     mkdirSync(artifactsDir, { recursive: true });
     writeRunJson();
-    updateRunIndex(currentRun);
+    updateRunIndex(runsDir, indexPath, currentRun);
     initialized = true;
   }
 
@@ -188,7 +190,7 @@ export function createRunRecorder(
       plan: { reason: plan.reason },
     };
     writeRunJson();
-    updateRunIndex(currentRun);
+    updateRunIndex(runsDir, indexPath, currentRun);
   }
 
   function findNode(nodeId?: string) {
@@ -216,6 +218,9 @@ export function createRunRecorder(
     if (ev.type === 'agent.init') {
       node.status = 'running';
       pushTimeline(node, { tool: 'agent.init', arg: typeof ev.model === 'string' ? ev.model : undefined }, ev.ts);
+    } else if (ev.type === 'task.started') {
+      node.status = 'running';
+      pushTimeline(node, { what: 'task started' }, ev.ts);
     } else if (ev.type.startsWith('tool.')) {
       node.status = 'running';
       const tool = ev.type.replace(/^tool\./, '');
@@ -348,7 +353,7 @@ export function createRunRecorder(
         writePlanJson();
       }
       writeRunJson();
-      updateRunIndex(currentRun);
+      updateRunIndex(runsDir, indexPath, currentRun);
     },
   };
 }
@@ -417,10 +422,10 @@ function buildGraph(args: {
     nodes.push({
       id: 'worker',
       type: 'harness-worker',
-      title: 'Worker · session.task',
+      title: 'Worker · Smithers CLI task',
       x: TASK_COLUMNS[1],
       y: FIRST_TASK_Y,
-      agent: 'flue · session(worker) · role=worker',
+      agent: 'smithers · CLI AgentLike',
       prompt: `Goal: ${args.goal}`,
       tools: ['read', 'write', 'edit', 'bash', 'done'],
       status: 'idle',
@@ -630,9 +635,9 @@ function uniqueSlug(value: string, used: Set<string>) {
   return next;
 }
 
-function updateRunIndex(run: RunJson) {
-  mkdirSync(RUNS_DIR, { recursive: true });
-  const index = loadRunIndex();
+function updateRunIndex(runsDir: string, indexPath: string, run: RunJson) {
+  mkdirSync(runsDir, { recursive: true });
+  const index = loadRunIndex(runsDir, indexPath);
   const entry = {
     id: run.id,
     goal: run.goal,
@@ -642,26 +647,26 @@ function updateRunIndex(run: RunJson) {
   };
   const withoutCurrent = index.runs.filter((item) => item.id !== run.id);
   const runs = [entry, ...withoutCurrent].sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
-  writeFileSync(INDEX_PATH, `${JSON.stringify({ runs }, null, 2)}\n`);
+  writeFileSync(indexPath, `${JSON.stringify({ runs }, null, 2)}\n`);
 }
 
-function loadRunIndex(): RunIndex {
-  if (existsSync(INDEX_PATH)) {
+function loadRunIndex(runsDir: string, indexPath: string): RunIndex {
+  if (existsSync(indexPath)) {
     try {
-      const parsed = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as RunIndex;
+      const parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as RunIndex;
       if (Array.isArray(parsed.runs)) return parsed;
     } catch {
       // Fall through to rebuilding from run.json files.
     }
   }
-  return rebuildRunIndex();
+  return rebuildRunIndex(runsDir);
 }
 
-function rebuildRunIndex(): RunIndex {
-  if (!existsSync(RUNS_DIR)) return { runs: [] };
-  const runs = readdirSync(RUNS_DIR, { withFileTypes: true })
+function rebuildRunIndex(runsDir: string): RunIndex {
+  if (!existsSync(runsDir)) return { runs: [] };
+  const runs = readdirSync(runsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => join(RUNS_DIR, entry.name, 'run.json'))
+    .map((entry) => join(runsDir, entry.name, 'run.json'))
     .filter((path) => existsSync(path))
     .flatMap((path) => {
       try {
