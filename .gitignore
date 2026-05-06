@@ -3,7 +3,8 @@ dist/
 .harness/
 .smithers/
 .pi/
-web/
+web/*
+!web/index.html
 .env
 *.db
 *.db-shm

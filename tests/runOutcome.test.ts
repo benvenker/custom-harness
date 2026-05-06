@@ -89,6 +89,24 @@ describe('runOutcome', () => {
     expect(events.find((event: { type: string }) => event.type === 'run.error')?.message).toContain('validation');
   });
 
+  it('accepts plain Codex-style task text as the task result while keeping structured validation', async () => {
+    const runsDir = tempRunsDir();
+    const planner = new FakeAgent([{ path: 'harness', reason: 'simple' }]);
+    const executor = new FakeAgent(['**Audit**\nMention the schema example `{ result: string }` without returning JSON.']);
+
+    const result = await runOutcome({
+      goal: 'audit in prose',
+      planner,
+      executorAgent: executor,
+      runId: 'plain-text-task-test',
+      runsDir,
+    });
+
+    const runDir = join(runsDir, 'plain-text-task-test');
+    expect(result.status).toBe('succeeded');
+    expect(readFileSync(join(runDir, 'artifacts', 'worker.txt'), 'utf8')).toContain('Mention the schema example');
+  });
+
   it('runs the harness path as one Smithers CLI-agent task and writes compatible artifacts', async () => {
     const runsDir = tempRunsDir();
     const planner = new FakeAgent([{ path: 'harness', reason: 'simple' }]);
@@ -120,6 +138,12 @@ describe('runOutcome', () => {
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toContain('goal');
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toContain('plan');
     expect(planJson.graph.nodes.map((node: { id: string }) => node.id)).toContain('worker');
+    expect(planJson.graph.nodes.find((node: { id: string }) => node.id === 'worker')?.outputArtifact).toBe(
+      'artifacts/worker.txt',
+    );
+    expect(planJson.graph.nodes.find((node: { id: string }) => node.id === 'worker')?.outputPreview).toContain(
+      'done from fake executor',
+    );
     expect(events.map((event: { type: string }) => event.type)).toContain('task.started');
     expect(events.map((event: { type: string }) => event.type)).toContain('task.done');
     expect(events.map((event: { type: string }) => event.type)).toContain('agent.output');
@@ -168,6 +192,7 @@ describe('runOutcome', () => {
     ]);
     expect(String(executor.calls[0]?.prompt)).toContain('First Step');
     expect(String(executor.calls[1]?.prompt)).toContain('Second Step');
+    expect(String(executor.calls[1]?.prompt)).toContain('first output');
     expect(readFileSync(join(runDir, 'artifacts', 'first-step.txt'), 'utf8')).toContain('first output');
     expect(readFileSync(join(runDir, 'artifacts', 'second-step.inputs.json'), 'utf8')).toContain('first-step.txt');
 

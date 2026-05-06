@@ -17,18 +17,39 @@ export function buildPlannerPrompt(goal: string, context?: string) {
 }
 
 export function buildHarnessPrompt(goal: string, context?: string) {
-  return `Goal: ${goal}${context ? `\n\nAdditional context:\n${context}` : ''}`;
+  return [
+    `Goal: ${goal}`,
+    context ? `Additional context:\n${context}` : null,
+    TASK_OUTPUT_CONTRACT,
+  ].filter(Boolean).join('\n\n');
 }
 
 export function buildTaskPrompt(args: {
   goal: string;
   context?: string;
   task: Extract<WorkflowNode, { type: 'task' }>;
+  upstream?: Array<{ from: string; result?: string; artifact?: string }>;
 }) {
   return [
     `Overall goal: ${args.goal}`,
     args.context ? `Additional context:\n${args.context}` : null,
+    args.upstream && args.upstream.length > 0
+      ? [
+          'Upstream task outputs:',
+          ...args.upstream.map((item) =>
+            [
+              `From ${item.from}:`,
+              item.artifact ? `Artifact: ${item.artifact}` : null,
+              item.result ? item.result : null,
+            ].filter(Boolean).join('\n'),
+          ),
+        ].join('\n\n')
+      : null,
     `Task: ${args.task.name}`,
     args.task.prompt,
+    TASK_OUTPUT_CONTRACT,
   ].filter(Boolean).join('\n\n');
 }
+
+const TASK_OUTPUT_CONTRACT =
+  'When complete, return a final answer as JSON matching this exact shape: {"result":"<your complete task output as a string>"}.';

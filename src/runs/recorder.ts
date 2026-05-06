@@ -63,6 +63,9 @@ type RenderNode = {
   status: RunStatus;
   duration?: string;
   decision?: RunPath;
+  outputArtifact?: string;
+  outputPreview?: string;
+  outputBytes?: number;
   timeline: TimelineEvent[];
 };
 
@@ -126,7 +129,7 @@ const PLAN_Y = 230;
 const FIRST_TASK_Y = 480;
 const TASK_ROW_STEP = 240;
 const PLANNER_PROMPT =
-  'Classify the goal as harness (single-loop) or workflow (DAG). For workflow, define a tree of task / sequence / parallel nodes.';
+  'Classify the goal as harness (single Smithers CLI-agent task) or workflow (Smithers DAG). For workflow, define a tree of task / sequence / parallel nodes.';
 
 export function createRunRecorder(
   runId: string,
@@ -230,6 +233,9 @@ export function createRunRecorder(
       const bytes = typeof ev.bytes === 'number' ? formatBytes(ev.bytes) : null;
       const preview = typeof ev.preview === 'string' ? ` · “${truncate(ev.preview, 90)}”` : '';
       const artifact = typeof ev.artifact === 'string' ? ` · ${ev.artifact}` : '';
+      if (typeof ev.artifact === 'string') node.outputArtifact = ev.artifact;
+      if (typeof ev.preview === 'string') node.outputPreview = ev.preview;
+      if (typeof ev.bytes === 'number') node.outputBytes = ev.bytes;
       pushTimeline(node, { what: `output${bytes ? ` · ${bytes}` : ''}${preview}${artifact}` }, ev.ts);
     } else if (ev.type === 'task.checkpoint') {
       if (ev.checkpoint === 'started') node.status = 'running';
@@ -432,7 +438,7 @@ function buildGraph(args: {
       timeline: [],
     });
     edges.push({ from: 'plan', to: 'worker', label: 'harness' });
-    return finishGraph(args, nodes, edges, 'worker', 'Single-loop Harness');
+    return finishGraph(args, nodes, edges, 'worker', 'Smithers CLI Task');
   }
 
   const layout = layoutWorkflow(args.plan.workflow.root);

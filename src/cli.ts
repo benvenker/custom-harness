@@ -72,7 +72,7 @@ export async function runCli(args: string[], deps: CliDeps = {}) {
   return result.status === 'succeeded' ? 0 : 1;
 }
 
-function depsFromEnv(): CliDeps {
+export function depsFromEnv(): CliDeps {
   const fakePlan = process.env.CUSTOM_HARNESS_FAKE_PLAN;
   const fakeExecutorOutput = process.env.CUSTOM_HARNESS_FAKE_EXECUTOR_OUTPUT;
   return {

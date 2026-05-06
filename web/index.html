@@ -1,0 +1,1754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>custom-harness — Smithers durable outcome runner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bone:    #F2EDE2;
+    --bone-2:  #ECE5D4;
+    --bone-3:  #E3DAC4;
+    --paper:   #FAF6EC;
+    --ink:     #111110;
+    --ink-2:   #2A2924;
+    --muted:   #6B6760;
+    --rule:    #1B1A17;
+    --hair:    rgba(17,17,16,0.14);
+    --hair-2:  rgba(17,17,16,0.08);
+
+    --workflow: #1D3CFF;   /* Smithers DAG / multi-task path */
+    --harness:  #D8543D;   /* Smithers single CLI-agent task */
+    --ok:       #2C7A3F;
+    --warn:     #B7791F;
+
+    --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --sans:  "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    background: var(--bone);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* paper grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background-image:
+      radial-gradient(rgba(17,17,16,0.035) 1px, transparent 1px),
+      radial-gradient(rgba(17,17,16,0.025) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    mix-blend-mode: multiply;
+  }
+
+  .frame {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  /* ---------- Top bar ---------- */
+  header.top {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--hair);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .wordmark {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 500;
+    font-style: italic;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+  .glyph {
+    width: 22px; height: 22px;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    position: relative;
+  }
+  .glyph::before, .glyph::after {
+    content: ""; position: absolute; inset: 0;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+  }
+  .glyph::before { transform: translateX(-3px); opacity: .35; }
+  .glyph::after  { transform: translateX(3px);  opacity: .35; }
+
+  .nav-center { display: flex; gap: 28px; color: var(--muted); }
+  .nav-center a { color: inherit; text-decoration: none; }
+  .nav-center a:hover { color: var(--ink); }
+  .nav-center .active { color: var(--ink); border-bottom: 1px solid var(--ink); padding-bottom: 4px; margin-bottom: -5px; }
+
+  .meta-right {
+    justify-self: end;
+    display: flex; align-items: center; gap: 12px;
+    color: var(--muted);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    color: var(--ink);
+    background: var(--bone-2);
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 3px rgba(44,122,63,0.16);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(44,122,63,0.16); }
+    50%     { box-shadow: 0 0 0 6px rgba(44,122,63,0.04); }
+  }
+
+  /* ---------- Goal strip ---------- */
+  .goal-strip {
+    padding: 14px 32px 12px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--paper);
+    position: relative;
+  }
+  .strip-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+    display: flex; gap: 18px; align-items: center;
+  }
+  .strip-label .num {
+    color: var(--ink);
+  }
+  .goal-text {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin: 0;
+    font-variation-settings: "opsz" 96, "SOFT" 50;
+    max-width: 920px;
+  }
+  .goal-edit {
+    width: 100%; max-width: 920px;
+    background: transparent; border: none;
+    font-family: var(--serif); font-size: 22px; font-weight: 400;
+    line-height: 1.2; letter-spacing: -0.02em;
+    color: var(--ink); padding: 0; margin: 0;
+    resize: none; outline: none;
+    font-variation-settings: "opsz" 96, "SOFT" 50;
+  }
+
+  .goal-row {
+    display: flex; gap: 16px; align-items: center;
+    margin-top: 8px; flex-wrap: wrap;
+  }
+  .goal-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px;
+    background: var(--ink);
+    color: var(--bone);
+    border: 1px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .btn:hover { background: var(--workflow); border-color: var(--workflow); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn:disabled:hover {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--bone);
+  }
+  .btn .arrow { transition: transform .2s; }
+  .btn:hover .arrow { transform: translateX(3px); }
+
+  .btn.ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--rule);
+  }
+  .btn.ghost:hover {
+    background: var(--ink);
+    color: var(--bone);
+    border-color: var(--ink);
+  }
+  .btn.ghost:disabled:hover {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--rule);
+  }
+  .run-action-status {
+    min-height: 16px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .run-action-status.error { color: var(--harness); }
+  .run-action-status.ok { color: var(--ok); }
+
+  .sample-bar {
+    margin-left: auto;
+    display: flex; gap: 4px; align-items: center;
+    flex-shrink: 0;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .sample-btn {
+    background: transparent;
+    border: 1px solid var(--hair);
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .sample-btn:hover { border-color: var(--rule); }
+  .sample-btn.active { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+
+  /* runs picker — lives at the top of the inspector */
+  .inspector-runs {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--bone-2);
+    flex-shrink: 0;
+  }
+  .inspector-runs.empty { display: none; }
+  .inspector-runs-label {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .inspector-runs-select {
+    flex: 1 1 auto; min-width: 0;
+    appearance: none; -webkit-appearance: none;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 5px 26px 5px 8px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+      linear-gradient(-45deg, transparent 50%, var(--ink) 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+  }
+  .inspector-runs-select:hover { border-color: var(--ink); }
+  .inspector-runs-select:focus {
+    outline: 2px solid var(--workflow);
+    outline-offset: -1px;
+  }
+
+  /* provenance badge in plan strip */
+  .prov {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid;
+    color: var(--muted);
+    border-color: var(--hair);
+  }
+  .prov.real    { color: var(--ok);      border-color: var(--ok); }
+  .prov.synth   { color: var(--warn);    border-color: var(--warn); }
+  .prov.failed  { color: var(--harness); border-color: var(--harness); }
+  .prov.demo    { color: var(--muted);   border-color: var(--hair); }
+  .prov:empty { display: none; }
+
+  /* ---------- Plan strip ---------- */
+  .plan-strip {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(360px, 2fr) auto;
+    gap: 28px;
+    padding: 10px 32px;
+    border-bottom: 1px solid var(--hair);
+    align-items: center;
+    background: var(--bone-2);
+  }
+  .plan-cell .k {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .plan-cell .v {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  .plan-cell .v.path {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    color: var(--workflow);
+    display: inline-block;
+  }
+  .plan-cell .v.path.harness { color: var(--harness); }
+  .plan-cell.reason .v {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 60;
+  }
+  .plan-meta {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.5;
+  }
+  .plan-meta b { color: var(--ink); font-weight: 500; }
+
+  /* ---------- Workspace ---------- */
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .canvas-wrap {
+    border-right: 1px solid var(--hair);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background:
+      linear-gradient(var(--bone), var(--bone)),
+      repeating-linear-gradient(0deg,  rgba(17,17,16,0.05) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, rgba(17,17,16,0.05) 0 1px, transparent 1px 24px);
+    background-blend-mode: multiply;
+  }
+  .canvas-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--paper);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .canvas-head .left { display: flex; gap: 16px; align-items: center; }
+  .canvas-head .left b { color: var(--ink); font-weight: 500; }
+  .legend {
+    display: flex; gap: 14px; align-items: center;
+  }
+  .swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch i { width: 8px; height: 8px; display: inline-block; border: 1px solid; }
+
+  .canvas {
+    position: relative;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+  }
+  .canvas-inner {
+    position: relative;
+    width: 1080px;
+    height: 920px;        /* JS overrides to fit nodes; never stretches */
+    margin: 0 auto;       /* center horizontally; grid bg fills the rest */
+  }
+  .canvas-svg {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    width: 100%; height: 100%;
+  }
+
+  /* ---------- Node ---------- */
+  .node {
+    position: absolute;
+    width: 280px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    box-shadow: 3px 3px 0 0 var(--ink);
+    cursor: pointer;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+    user-select: none;
+  }
+  .node:hover {
+    transform: translate(-1px,-1px);
+    box-shadow: 5px 5px 0 0 var(--ink);
+  }
+  .node.selected {
+    background: var(--bone-3);
+    box-shadow: 5px 5px 0 0 var(--workflow), 6px 6px 0 1px var(--ink);
+  }
+  .node.harness-node.selected { box-shadow: 5px 5px 0 0 var(--harness), 6px 6px 0 1px var(--ink); }
+  .node.harness-node.selected .n-bar { background: var(--harness); }
+  .node-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .node-head .type {
+    color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .node-head .type b { color: var(--ink); font-weight: 500; }
+  .node-head .status {
+    color: var(--muted);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .node-head .status::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .node.idle .status::before { background: var(--muted); }
+  .node.running .status { color: var(--workflow); }
+  .node.running .status::before {
+    background: var(--workflow);
+    box-shadow: 0 0 0 3px rgba(29,60,255,0.2);
+    animation: pulse-blue 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse-blue {
+    0%,100% { box-shadow: 0 0 0 3px rgba(29,60,255,0.2); }
+    50%     { box-shadow: 0 0 0 6px rgba(29,60,255,0.05); }
+  }
+  .node.done .status { color: var(--ok); }
+  .node.done .status::before { background: var(--ok); }
+
+  .node-body { padding: 10px 12px 12px; }
+  .node-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    margin-bottom: 4px;
+    font-variation-settings: "opsz" 36, "SOFT" 40;
+  }
+  .node-agent {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .node-agent b { color: var(--ink); font-weight: 500; }
+  .node-prompt {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.45;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .node-tools {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    padding-top: 8px;
+    border-top: 1px dashed var(--hair);
+  }
+  .tool-chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    color: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
+  .tool-chip.active {
+    color: var(--workflow);
+    border-color: var(--workflow);
+    background: rgba(29,60,255,0.05);
+  }
+  .node.harness-node .tool-chip.active {
+    color: var(--harness);
+    border-color: var(--harness);
+    background: rgba(216,84,61,0.05);
+  }
+  .node-bar {
+    height: 3px;
+    background: var(--hair);
+    position: relative;
+    overflow: hidden;
+  }
+  .node-bar i {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--workflow);
+    width: 0%;
+    transition: width .3s ease;
+  }
+  .node.running .node-bar i { animation: indet 1.4s ease-in-out infinite; }
+  @keyframes indet { 0% { left:-30%; width:30% } 100% { left:100%; width:30% } }
+  .node.done .node-bar i { width: 100%; background: var(--ok); }
+  .node.harness-node.running .node-bar i { background: var(--harness); animation: indet 1.4s ease-in-out infinite; }
+
+  /* Node type specifics */
+  .node.goal-node {
+    background: var(--ink);
+    color: var(--bone);
+    border-color: var(--ink);
+  }
+  .node.goal-node .node-head { border-bottom-color: rgba(242,237,226,0.2); color: rgba(242,237,226,0.6); }
+  .node.goal-node .node-head .type b { color: var(--bone); }
+  .node.goal-node .node-title { color: var(--bone); }
+  .node.goal-node .node-agent { color: rgba(242,237,226,0.5); }
+  .node.goal-node .node-prompt { color: rgba(242,237,226,0.85); }
+  .node.goal-node .node-bar { background: rgba(242,237,226,0.15); }
+  .node.goal-node .node-bar i { background: var(--bone); width: 100%; }
+
+  .node.planner-node {
+    background: var(--bone-2);
+  }
+  .node.planner-node .node-title { font-style: italic; }
+  .node.planner-node .node-head .type b { color: var(--workflow); }
+  .node.planner-node.harness-decision .node-head .type b { color: var(--harness); }
+  .node.harness-node .node-head .type b { color: var(--harness); }
+
+  /* ---------- Inspector ---------- */
+  .inspector {
+    background: var(--paper);
+    display: flex; flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .inspector-content {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .insp-head {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .insp-eyebrow {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .insp-eyebrow b { color: var(--ink); font-weight: 500; }
+  .insp-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0 0 8px;
+    font-variation-settings: "opsz" 36, "SOFT" 40;
+  }
+  .insp-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .insp-sub b { color: var(--ink); font-weight: 500; }
+
+  .insp-body {
+    overflow-y: auto;
+    padding: 16px 18px 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .field {
+    margin-bottom: 18px;
+  }
+  .field .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .field .val {
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .field .val.mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bone-2);
+    padding: 8px 10px;
+    border: 1px solid var(--hair);
+    color: var(--ink-2);
+  }
+  .field .val.prompt {
+    font-family: var(--serif);
+    font-size: 15px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 50;
+    color: var(--ink);
+    border-left: 2px solid var(--workflow);
+    padding: 4px 0 4px 12px;
+  }
+  .field .val.prompt.harness { border-color: var(--harness); }
+  .output-box {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 280px;
+    overflow: auto;
+  }
+  .output-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+
+  /* timeline */
+  .timeline {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .tl-row {
+    display: grid;
+    grid-template-columns: 44px 70px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 10px;
+    border-bottom: 1px dashed var(--hair);
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-row .step {
+    color: var(--workflow);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+  .tl-row.harness .step { color: var(--harness); }
+  .tl-row .ts { color: var(--muted); font-size: 10.5px; }
+  .tl-row .what { color: var(--ink); }
+  .tl-row .what .tool {
+    color: var(--workflow);
+  }
+  .tl-row.harness .what .tool { color: var(--harness); }
+  .tl-row .what .arg {
+    color: var(--ink-2);
+  }
+  .tl-row .what .v { color: var(--ok); }
+
+  /* timeline collapse */
+  .tl-row.tl-gap {
+    background: var(--bone-3);
+  }
+  .tl-row.tl-gap .step { color: var(--muted); }
+  .tl-row.tl-gap .ts   { color: var(--muted); }
+  .tl-expand-btn, .tl-collapse-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--workflow);
+    cursor: pointer;
+  }
+  .tl-row.harness .tl-expand-btn,
+  .tl-row.harness .tl-collapse-btn { color: var(--harness); }
+  .tl-expand-btn:hover, .tl-collapse-btn:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+
+  .empty-state {
+    padding: 40px 18px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty-state .e-glyph {
+    width: 48px; height: 48px;
+    border: 1px dashed var(--hair);
+    border-radius: 50%;
+    display: inline-block;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .empty-state .e-glyph::after {
+    content: "?"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 22px; font-style: italic;
+    color: var(--muted);
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 18px 32px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid var(--hair);
+  }
+  footer a { color: inherit; text-decoration: none; border-bottom: 1px dashed var(--hair); }
+  footer a:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* edge labels */
+  .edge-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    fill: var(--muted);
+    paint-order: stroke;
+    stroke: var(--bone);
+    stroke-width: 4px;
+  }
+
+  ::selection { background: var(--workflow); color: var(--bone); }
+
+  @media (max-width: 1100px) {
+    .workspace { grid-template-columns: 1fr; }
+    .canvas-wrap { border-right: none; border-bottom: 1px solid var(--hair); }
+    .inspector { min-height: 480px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <!-- Top bar -->
+  <header class="top">
+    <div class="wordmark">
+      <span class="glyph"></span>
+      <span>custom-harness</span>
+    </div>
+    <nav class="nav-center">
+      <a href="#" class="active">Console</a>
+      <a href="#">Runs</a>
+      <a href="#">Agents</a>
+      <a href="#">Schema</a>
+      <a href="#">Docs</a>
+    </nav>
+    <div class="meta-right">
+      <span>v0.1.0</span>
+      <span class="pill"><span class="dot"></span>READY</span>
+    </div>
+  </header>
+
+  <!-- Goal strip -->
+  <section class="goal-strip">
+    <div class="strip-label">
+      <span class="num">00 / Goal</span>
+      <span>What outcome do you want?</span>
+    </div>
+    <textarea class="goal-edit" id="goalInput" rows="2">Audit AGENTS.md and README.md for stale references and propose a unified rewrite.</textarea>
+    <div class="goal-row">
+      <div class="goal-actions">
+        <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
+        <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
+        <button class="btn ghost" id="resetBtn">Reset</button>
+        <span class="run-action-status" id="runActionStatus"></span>
+      </div>
+      <div class="sample-bar">
+        <span style="margin-right: 4px;">Demos</span>
+        <button class="sample-btn active" data-sample="audit">Audit (workflow)</button>
+        <button class="sample-btn" data-sample="checks">Checks (parallel)</button>
+        <button class="sample-btn" data-sample="version">Version flag (harness)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Plan strip -->
+  <section class="plan-strip" id="planStrip">
+    <div class="plan-cell">
+      <div class="k">01 / Planner decision</div>
+      <div class="v">
+        <span class="path" id="pathPill">workflow</span>
+        <span class="prov demo" id="provBadge">demo</span>
+      </div>
+    </div>
+    <div class="plan-cell reason">
+      <div class="k">Reason</div>
+      <div class="v" id="planReason">Multiple distinct phases — independent file scans then synthesis — benefits from durable checkpointing.</div>
+    </div>
+    <div class="plan-meta">
+      <div>plan latency <b id="planLatency">412ms</b></div>
+      <div>plan tokens <b id="planTokens">1,287</b></div>
+      <div>run id <b id="runId">a3f2-bb18-91c0</b></div>
+    </div>
+  </section>
+
+  <!-- Workspace: DAG canvas + Inspector -->
+  <section class="workspace">
+
+    <div class="canvas-wrap">
+      <div class="canvas-head">
+        <div class="left">
+          <span>02 / Execution graph · <b id="execTitle">Audit Pipeline</b></span>
+        </div>
+        <div class="legend">
+          <span class="swatch"><i style="border-color:var(--ink);background:var(--ink)"></i><span>goal</span></span>
+          <span class="swatch"><i style="border-color:var(--rule);background:var(--bone-2)"></i><span>planner</span></span>
+          <span class="swatch"><i style="border-color:var(--workflow);background:rgba(29,60,255,0.1)"></i><span>task · running</span></span>
+          <span class="swatch"><i style="border-color:var(--ok);background:rgba(44,122,63,0.12)"></i><span>done</span></span>
+        </div>
+      </div>
+      <div class="canvas" id="canvas">
+        <div class="canvas-inner" id="canvasInner">
+          <svg class="canvas-svg" id="canvasSvg" viewBox="0 0 1080 920"></svg>
+          <!-- nodes injected here -->
+        </div>
+      </div>
+    </div>
+
+    <aside class="inspector" id="inspector">
+      <div class="inspector-runs empty" id="runsBar">
+        <span class="inspector-runs-label">Runs</span>
+        <select class="inspector-runs-select" id="runsSelect" aria-label="Select run"></select>
+      </div>
+      <div class="inspector-content" id="inspectorContent">
+        <!-- inspector content injected -->
+      </div>
+    </aside>
+
+  </section>
+
+  <footer>
+    <div>custom-harness · prototype · 2026</div>
+    <div>smithers · openrouter · claude-sonnet-4-6</div>
+  </footer>
+
+</div>
+
+<script>
+  // ============ Sample data: each sample is a complete run plan + node activity ============
+
+  const SAMPLES = {
+    audit: {
+      goal: "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+      path: "workflow",
+      reason: "Multiple distinct phases — independent file scans then synthesis — benefits from durable checkpointing.",
+      latency: "412ms", tokens: "1,287", runId: "a3f2-bb18-91c0",
+      title: "Audit Pipeline",
+      nodes: [
+        { id: "goal",    type: "goal",    title: "User goal",         x: 380, y: 30,
+          agent: "user",
+          prompt: "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+          tools: [], status: "done",
+          timeline: [
+            { ts: "14:23:00", what: "submitted" },
+          ]
+        },
+        { id: "plan",    type: "planner", title: "Planner",           x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal as harness (single Smithers CLI-agent task) or workflow (Smithers DAG). For workflow, define a tree of task / sequence / parallel nodes.",
+          tools: ["zod","generateObject"], status: "done",
+          timeline: [
+            { ts: "14:23:00", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:23:01", what: "decision = workflow" },
+            { ts: "14:23:01", what: "tree: sequence([parallel(scan-3), synthesize])" },
+          ]
+        },
+        { id: "scan-1",  type: "task",    title: "Audit AGENTS.md",   x: 80,  y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read AGENTS.md. List outdated tool references, unclear constraints, and statements that no longer match the current code in src/.",
+          tools: ["read_file","bash"], status: "done", duration: "2.3s",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "AGENTS.md" },
+            { ts: "14:23:05", tool: "bash", arg: "rg -l 'smithers' src/" },
+            { ts: "14:23:06", what: "output · 412 chars · ‘mentions outdated `done` tool semantics’" },
+            { ts: "14:23:06", what: "checkpoint↓ smithers.db" },
+          ]
+        },
+        { id: "scan-2",  type: "task",    title: "Audit README.md",   x: 380, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read README.md. Flag typos, drift from current behavior, and gaps in setup or usage instructions.",
+          tools: ["read_file"], status: "done", duration: "1.8s",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "README.md" },
+            { ts: "14:23:07", what: "output · 287 chars · ‘intro paragraph has 4 typos’" },
+            { ts: "14:23:07", what: "checkpoint↓ smithers.db" },
+          ]
+        },
+        { id: "scan-3",  type: "task",    title: "Inventory deps",    x: 680, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read package.json. List dependencies with versions and any unused or out-of-date entries.",
+          tools: ["read_file","bash"], status: "running",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "package.json" },
+            { ts: "14:23:08", tool: "bash", arg: "bun outdated" },
+          ]
+        },
+        { id: "synth",   type: "task",    title: "Propose unified rewrite", x: 380, y: 720,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Combine the three scan outputs into a single proposal. Produce a unified outline, a target voice, and a concrete diff plan listing files to update.",
+          tools: ["write_file"], status: "idle",
+          timeline: [
+            { ts: "14:23:09", what: "queued · awaits scan-1, scan-2, scan-3" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal",   to: "plan",   label: "" },
+        { from: "plan",   to: "scan-1", label: "parallel" },
+        { from: "plan",   to: "scan-2", label: "" },
+        { from: "plan",   to: "scan-3", label: "" },
+        { from: "scan-1", to: "synth",  label: "" },
+        { from: "scan-2", to: "synth",  label: "" },
+        { from: "scan-3", to: "synth",  label: "barrier" },
+      ],
+      defaultSelected: "scan-1",
+    },
+
+    checks: {
+      goal: "Run typecheck, tests, and lint — then summarize.",
+      path: "workflow",
+      reason: "Three independent checks fan out in parallel, then converge into a summary task.",
+      latency: "356ms", tokens: "1,041", runId: "e8d4-7711-0fa2",
+      title: "Pre-commit Checks",
+      nodes: [
+        { id: "goal", type: "goal", title: "User goal", x: 380, y: 30,
+          agent: "user",
+          prompt: "Run typecheck, tests, and lint — then summarize.",
+          tools: [], status: "done",
+          timeline: [{ ts: "14:42:00", what: "submitted" }]
+        },
+        { id: "plan", type: "planner", title: "Planner", x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal. Three independent checks → parallel; followed by a summary → sequence.",
+          tools: ["generateObject"], status: "done",
+          timeline: [
+            { ts: "14:42:00", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:42:01", what: "decision = workflow" },
+            { ts: "14:42:01", what: "tree: sequence([parallel(typecheck, tests, lint), summarize])" },
+          ]
+        },
+        { id: "tc", type: "task", title: "Typecheck", x: 80, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run `bun tsc --noEmit` and report errors with file:line.",
+          tools: ["bash"], status: "done", duration: "3.1s",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun tsc --noEmit" },
+            { ts: "14:42:04", what: "exit=0 · 0 errors" },
+          ]
+        },
+        { id: "tt", type: "task", title: "Tests", x: 380, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run `bun test tests/` and report pass / fail counts and any failing test names.",
+          tools: ["bash"], status: "done", duration: "4.2s",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun test tests/" },
+            { ts: "14:42:05", what: "exit=0 · 14 passed" },
+          ]
+        },
+        { id: "ln", type: "task", title: "Lint", x: 680, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run lint over src/ and report any rule violations.",
+          tools: ["bash"], status: "running",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun eslint src" },
+          ]
+        },
+        { id: "sum", type: "task", title: "Summarize", x: 380, y: 720,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read the three reports above. Produce a one-paragraph summary highlighting any blocking issues.",
+          tools: [], status: "idle",
+          timeline: [
+            { ts: "14:42:06", what: "queued · awaits all checks" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal", to: "plan", label: "" },
+        { from: "plan", to: "tc",   label: "parallel" },
+        { from: "plan", to: "tt",   label: "" },
+        { from: "plan", to: "ln",   label: "" },
+        { from: "tc",   to: "sum",  label: "" },
+        { from: "tt",   to: "sum",  label: "" },
+        { from: "ln",   to: "sum",  label: "barrier" },
+      ],
+      defaultSelected: "ln",
+    },
+
+    version: {
+      goal: "Add a --version flag to the CLI.",
+      path: "harness",
+      reason: "Single, focused code change. One agent loop is sufficient.",
+      latency: "287ms", tokens: "964", runId: "b7c1-04ee-2a55",
+      title: "Smithers CLI Task",
+      nodes: [
+        { id: "goal", type: "goal", title: "User goal", x: 380, y: 30,
+          agent: "user",
+          prompt: "Add a --version flag to the CLI.",
+          tools: [], status: "done",
+          timeline: [{ ts: "14:31:08", what: "submitted" }]
+        },
+        { id: "plan", type: "planner", title: "Planner", x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal. Tight, well-scoped change → harness path; run one Smithers CLI-agent task with node id worker.",
+          tools: ["generateObject"], status: "done",
+          timeline: [
+            { ts: "14:31:08", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:31:09", what: "decision = harness" },
+            { ts: "14:31:09", what: "spawn: smithers · Task(id=worker, agent=CLI)" },
+          ],
+          decision: "harness",
+        },
+        { id: "worker", type: "harness-worker", title: "Worker · Smithers CLI task",
+          x: 380, y: 480,
+          agent: "smithers · CLI AgentLike",
+          prompt: "You are an expert at accomplishing goals. Read the goal, break into steps, execute, verify, then call done. Goal: Add a --version flag to the CLI.",
+          tools: ["read_file","write_file","bash","done"], status: "running",
+          timeline: [
+            { ts: "14:31:09", tool: "agent.init", arg: "model=claude-sonnet-4-6" },
+            { ts: "14:31:10", tool: "read_file", arg: "src/index.ts" },
+            { ts: "14:31:11", tool: "read_file", arg: "package.json" },
+            { ts: "14:31:13", tool: "write_file", arg: "src/index.ts (+9 −1)" },
+            { ts: "14:31:14", tool: "bash", arg: "bun src/index.ts --version" },
+            { ts: "14:31:14", what: "stdout = 0.1.0" },
+            { ts: "14:31:15", tool: "done", arg: "added --version flag" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal",   to: "plan",   label: "" },
+        { from: "plan",   to: "worker", label: "harness" },
+      ],
+      defaultSelected: "worker",
+    },
+  };
+
+  // ============ Render ============
+
+  const canvasInner = document.getElementById("canvasInner");
+  const canvasSvg   = document.getElementById("canvasSvg");
+  const inspector   = document.getElementById("inspectorContent");
+  const runsSelect  = document.getElementById("runsSelect");
+  const goalInput   = document.getElementById("goalInput");
+  const pathPill    = document.getElementById("pathPill");
+  const planReason  = document.getElementById("planReason");
+  const planLatency = document.getElementById("planLatency");
+  const planTokens  = document.getElementById("planTokens");
+  const runIdEl     = document.getElementById("runId");
+  const execTitle   = document.getElementById("execTitle");
+  const planBtn     = document.getElementById("planBtn");
+  const rerunBtn    = document.getElementById("rerunBtn");
+  const resetBtn    = document.getElementById("resetBtn");
+  const runActionStatus = document.getElementById("runActionStatus");
+  const sampleBtns  = document.querySelectorAll(".sample-btn");
+
+  let currentSample = "audit";
+  let selectedId = null;
+  let currentRunId = null;
+  let runRefreshTimer = null;
+
+  const NODE_W = 280;
+  const NODE_H = 158; // approx — actual height varies, layout tolerates
+
+  function nodeHeightById(id) {
+    const el = document.getElementById("node-" + id);
+    return el ? el.offsetHeight : NODE_H;
+  }
+
+  function renderNodes(sample) {
+    // clear
+    [...canvasInner.querySelectorAll(".node")].forEach(n => n.remove());
+
+    sample.nodes.forEach(n => {
+      const el = document.createElement("div");
+      const isHarness = n.type === "harness-worker" || (sample.path === "harness" && n.type === "task");
+      const isGoal    = n.type === "goal";
+      const isPlanner = n.type === "planner";
+      el.className = [
+        "node",
+        isGoal ? "goal-node" : "",
+        isPlanner ? "planner-node" : "",
+        n.decision === "harness" ? "harness-decision" : "",
+        isHarness ? "harness-node" : "",
+        n.status,
+      ].filter(Boolean).join(" ");
+      el.id = "node-" + n.id;
+      el.style.left = n.x + "px";
+      el.style.top  = n.y + "px";
+
+      const typeLabel = isGoal ? "Goal" :
+                        isPlanner ? "Planner" :
+                        isHarness ? "Harness · Smithers" :
+                        "Task";
+      const stepBadge = isGoal ? "·" : isPlanner ? "01" :
+                        isHarness ? "H" :
+                        ("0" + (sample.nodes.filter(x => x.type === "task" || x.type === "harness-worker").indexOf(n) + 1)).slice(-2);
+
+      const statusText = n.status === "done"    ? `done${n.duration ? " · " + n.duration : ""}` :
+                         n.status === "running" ? "running"
+                                                : "pending";
+
+      el.innerHTML = `
+        <div class="node-head">
+          <span class="type"><b>${typeLabel}</b><span style="opacity:.5">${stepBadge}</span></span>
+          <span class="status">${statusText}</span>
+        </div>
+        <div class="node-body">
+          <div class="node-title">${n.title}</div>
+          <div class="node-agent">${n.agent}</div>
+          <div class="node-prompt">${n.prompt}</div>
+          ${n.tools && n.tools.length ? `
+            <div class="node-tools">
+              ${n.tools.map(t => `<span class="tool-chip ${n.status==='running'?'active':''}">${t}</span>`).join("")}
+            </div>
+          ` : ""}
+        </div>
+        <div class="node-bar"><i></i></div>
+      `;
+      el.addEventListener("click", () => selectNode(n.id));
+      canvasInner.appendChild(el);
+    });
+  }
+
+  function renderEdges(sample) {
+    canvasSvg.innerHTML = `
+      <defs>
+        <marker id="arrow"  viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1B1A17"/>
+        </marker>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1D3CFF"/>
+        </marker>
+        <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#D8543D"/>
+        </marker>
+      </defs>
+    `;
+
+    sample.edges.forEach(e => {
+      const a = sample.nodes.find(n => n.id === e.from);
+      const b = sample.nodes.find(n => n.id === e.to);
+      if (!a || !b) return;
+
+      const ah = nodeHeightById(a.id);
+      const x1 = a.x + NODE_W / 2;
+      const y1 = a.y + ah;
+      const x2 = b.x + NODE_W / 2;
+      const y2 = b.y;
+
+      // bezier vertical curve
+      const dy = y2 - y1;
+      const cy1 = y1 + dy * 0.45;
+      const cy2 = y2 - dy * 0.45;
+
+      // color: blue if either endpoint is running/done in workflow path; orange for harness link
+      const targetNode = b;
+      const sourceNode = a;
+      const isHarnessEdge = sourceNode.decision === "harness" || targetNode.type === "harness-worker";
+      const stroke = isHarnessEdge ? "#D8543D"
+                   : (targetNode.status === "done" || targetNode.status === "running")
+                     ? "#1D3CFF" : "#1B1A17";
+      const dash   = (targetNode.status === "idle" && !isHarnessEdge) ? "4 4" : "none";
+      const opacity = (targetNode.status === "idle") ? 0.45 : 1;
+      const arrow  = isHarnessEdge ? "url(#arrow-orange)"
+                   : stroke === "#1D3CFF" ? "url(#arrow-blue)" : "url(#arrow)";
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2 - 4}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", stroke);
+      path.setAttribute("stroke-width", "1.5");
+      path.setAttribute("stroke-dasharray", dash);
+      path.setAttribute("opacity", opacity);
+      path.setAttribute("marker-end", arrow);
+      canvasSvg.appendChild(path);
+
+      if (e.label) {
+        const lx = (x1 + x2) / 2;
+        const ly = (y1 + y2) / 2;
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", lx);
+        text.setAttribute("y", ly);
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("class", "edge-label");
+        text.textContent = e.label;
+        canvasSvg.appendChild(text);
+      }
+    });
+  }
+
+  function selectNode(id) {
+    selectedId = id;
+    [...canvasInner.querySelectorAll(".node")].forEach(n => {
+      n.classList.toggle("selected", n.id === "node-" + id);
+    });
+    renderInspector();
+  }
+
+  // node ids whose full timeline is expanded (otherwise long timelines
+  // render bookends: first HEAD + last TAIL events with a "show all" gap).
+  const expandedNodes = new Set();
+  const TIMELINE_COLLAPSE_AT = 16;
+  const TIMELINE_HEAD = 6;
+  const TIMELINE_TAIL = 6;
+
+  function renderTimelineRow(ev, displayIndex, isHarness) {
+    const stepNum = String(displayIndex).padStart(2, "0");
+    let what;
+    if (ev.tool) {
+      const tool = escapeHtml(ev.tool);
+      const arg  = ev.arg != null ? `<span class="arg">(${escapeHtml(ev.arg)})</span>` : "";
+      what = `<span class="tool">${tool}</span>${arg}`;
+    } else {
+      what = `<span>${escapeHtml(ev.what || "")}</span>`;
+    }
+    return `
+      <div class="tl-row ${isHarness ? "harness" : ""}">
+        <span class="step">${stepNum}</span>
+        <span class="ts">${escapeHtml(ev.ts || "")}</span>
+        <span class="what">${what}</span>
+      </div>`;
+  }
+
+  function buildTimelineHtml(timeline, isHarness, nodeId) {
+    const all = timeline || [];
+    if (all.length === 0) {
+      return `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no activity yet</span></div>`;
+    }
+    const expanded  = expandedNodes.has(nodeId);
+    const collapsed = !expanded && all.length > TIMELINE_COLLAPSE_AT;
+
+    if (!collapsed) {
+      const rows = all.map((ev, i) => renderTimelineRow(ev, i + 1, isHarness));
+      if (expanded && all.length > TIMELINE_COLLAPSE_AT) {
+        rows.push(`<div class="tl-row tl-gap ${isHarness ? "harness" : ""}">
+          <span class="step">⋯</span>
+          <span class="ts">—</span>
+          <span class="what"><button class="tl-collapse-btn" data-node="${escapeHtml(nodeId)}">collapse to first ${TIMELINE_HEAD} + last ${TIMELINE_TAIL}</button></span>
+        </div>`);
+      }
+      return rows.join("");
+    }
+
+    // Collapsed: head + gap + tail
+    const head = all.slice(0, TIMELINE_HEAD);
+    const tail = all.slice(all.length - TIMELINE_TAIL);
+    const hidden = all.length - TIMELINE_HEAD - TIMELINE_TAIL;
+    const headRows = head.map((ev, i) => renderTimelineRow(ev, i + 1, isHarness));
+    const tailRows = tail.map((ev, i) =>
+      renderTimelineRow(ev, all.length - TIMELINE_TAIL + i + 1, isHarness));
+    const gap = `<div class="tl-row tl-gap ${isHarness ? "harness" : ""}">
+      <span class="step">⋯</span>
+      <span class="ts">—</span>
+      <span class="what"><button class="tl-expand-btn" data-node="${escapeHtml(nodeId)}">${hidden} hidden · show all ${all.length}</button></span>
+    </div>`;
+    return headRows.concat(gap, tailRows).join("");
+  }
+
+  function outputArtifactUrl(runId, artifact) {
+    return `/runs/${encodeURIComponent(runId)}/${String(artifact).split("/").map(encodeURIComponent).join("/")}`;
+  }
+
+  function outputFieldHtml(node) {
+    if (!node.outputArtifact && !node.outputPreview) return "";
+    const bytes = typeof node.outputBytes === "number" ? ` · ${formatBytes(node.outputBytes)}` : "";
+    const artifact = node.outputArtifact ? ` · ${escapeHtml(node.outputArtifact)}` : "";
+    const preview = node.outputPreview || "Loading output...";
+    return `
+      <div class="field">
+        <div class="lbl">
+          <span>Agent output</span>
+          <span class="output-meta">${bytes}${artifact}</span>
+        </div>
+        <pre class="output-box" id="nodeOutputBox">${escapeHtml(preview)}</pre>
+      </div>
+    `;
+  }
+
+  async function hydrateNodeOutput(node, selectedAtRender) {
+    if (!node.outputArtifact || !currentRunId) return;
+    const box = document.getElementById("nodeOutputBox");
+    if (!box) return;
+    try {
+      const response = await fetch(outputArtifactUrl(currentRunId, node.outputArtifact), { cache: "no-store" });
+      if (!response.ok) throw new Error(`artifact ${response.status}`);
+      const text = await response.text();
+      if (selectedId === selectedAtRender && document.getElementById("nodeOutputBox") === box) {
+        box.textContent = text;
+      }
+    } catch (err) {
+      if (selectedId === selectedAtRender && document.getElementById("nodeOutputBox") === box) {
+        box.textContent = node.outputPreview || `Could not load output: ${err.message}`;
+      }
+    }
+  }
+
+  function renderInspector() {
+    const sample = SAMPLES[currentSample];
+    const node   = sample.nodes.find(n => n.id === selectedId);
+    if (!node) {
+      inspector.innerHTML = `
+        <div class="empty-state">
+          <div class="e-glyph"></div>
+          <div>Select a node in the graph<br>to inspect its agent activity.</div>
+        </div>`;
+      return;
+    }
+
+    const isHarness = node.type === "harness-worker" || (sample.path === "harness" && node.type !== "goal" && node.type !== "planner");
+    const typeLabel = node.type === "goal"    ? "Goal · root"
+                    : node.type === "planner" ? "Smithers planner task"
+                    : isHarness               ? "Smithers CLI agent · single task"
+                                              : "Smithers task";
+
+    const tlRows = buildTimelineHtml(node.timeline, isHarness, node.id);
+    const selectedAtRender = node.id;
+
+    inspector.innerHTML = `
+      <div class="insp-head">
+        <div class="insp-eyebrow">
+          <span><b>${typeLabel}</b></span>
+          <span>${node.status}</span>
+        </div>
+        <h3 class="insp-title">${node.title}</h3>
+        <div class="insp-sub">id <b>${node.id}</b> · agent <b>${node.agent}</b>${node.duration ? ` · <b>${node.duration}</b>` : ""}</div>
+      </div>
+      <div class="insp-body">
+        <div class="field">
+          <div class="lbl">Agent prompt</div>
+          <div class="val prompt ${isHarness ? "harness" : ""}">${node.prompt}</div>
+        </div>
+        ${node.tools && node.tools.length ? `
+          <div class="field">
+            <div class="lbl">Tools available</div>
+            <div class="val mono">${node.tools.join(", ")}</div>
+          </div>
+        ` : ""}
+        ${outputFieldHtml(node)}
+        <div class="field">
+          <div class="lbl">
+            <span>Activity timeline</span>
+            <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:10px">${(node.timeline || []).length} events</span>
+          </div>
+          <div class="timeline">${tlRows}</div>
+        </div>
+      </div>
+    `;
+
+    inspector.querySelectorAll(".tl-expand-btn").forEach(b =>
+      b.addEventListener("click", () => {
+        expandedNodes.add(b.dataset.node);
+        renderInspector();
+      }));
+    inspector.querySelectorAll(".tl-collapse-btn").forEach(b =>
+      b.addEventListener("click", () => {
+        expandedNodes.delete(b.dataset.node);
+        renderInspector();
+      }));
+    hydrateNodeOutput(node, selectedAtRender);
+  }
+
+  function loadSample(key) {
+    currentSample = key;
+    const s = SAMPLES[key];
+
+    goalInput.value = s.goal;
+    pathPill.textContent = s.path;
+    pathPill.classList.toggle("harness", s.path === "harness");
+    planReason.textContent = s.reason;
+    planLatency.textContent = s.latency;
+    planTokens.textContent = s.tokens;
+    runIdEl.textContent = s.runId;
+    execTitle.textContent = s.title;
+
+    sampleBtns.forEach(b => b.classList.toggle("active", b.dataset.sample === key));
+
+    // resize the inner canvas to fit content
+    const maxX = Math.max(...s.nodes.map(n => n.x + NODE_W));
+    const maxY = Math.max(...s.nodes.map(n => n.y + 200));
+    canvasInner.style.width  = Math.max(maxX + 60, 1080) + "px";
+    canvasInner.style.height = Math.max(maxY + 60,  920) + "px";
+    canvasSvg.setAttribute("viewBox", `0 0 ${parseInt(canvasInner.style.width)} ${parseInt(canvasInner.style.height)}`);
+
+    renderNodes(s);
+    // edges depend on rendered node heights — rAF after layout
+    requestAnimationFrame(() => renderEdges(s));
+
+    selectedId = s.defaultSelected;
+    renderInspector();
+    [...canvasInner.querySelectorAll(".node")].forEach(n => {
+      n.classList.toggle("selected", n.id === "node-" + selectedId);
+    });
+  }
+
+  // ============ Real runs (read-only browser of runs/<id>/) ============
+
+  const runsBar = document.getElementById("runsBar");
+  const provBadge = document.getElementById("provBadge");
+
+  function setRunActionStatus(message, kind = "") {
+    if (!runActionStatus) return;
+    runActionStatus.textContent = message || "";
+    runActionStatus.classList.toggle("error", kind === "error");
+    runActionStatus.classList.toggle("ok", kind === "ok");
+  }
+
+  function setRunButtonsBusy(isBusy) {
+    planBtn.disabled = isBusy;
+    rerunBtn.disabled = isBusy || !currentRunId;
+  }
+
+  function setCurrentRunId(runId) {
+    currentRunId = runId;
+    rerunBtn.disabled = !currentRunId;
+  }
+
+  function scheduleRunRefresh(runId, status) {
+    if (runRefreshTimer) {
+      clearTimeout(runRefreshTimer);
+      runRefreshTimer = null;
+    }
+    if (status !== "running") return;
+    runRefreshTimer = setTimeout(() => {
+      if (currentRunId === runId) {
+        loadRun(runId, { silent: true, preserveStatus: true });
+      }
+    }, 3000);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function setProvenance(meta) {
+    if (!provBadge) return;
+    provBadge.classList.remove("real", "synth", "failed", "demo");
+    if (!meta) {
+      provBadge.classList.add("demo");
+      provBadge.textContent = "demo";
+      return;
+    }
+    if (meta.status === "failed" || meta.status === "error") {
+      provBadge.classList.add("failed");
+      provBadge.textContent = String(meta.status);
+    } else if (typeof meta.notes === "string" && /synth/i.test(meta.notes)) {
+      provBadge.classList.add("synth");
+      provBadge.textContent = "partial · synth";
+    } else {
+      provBadge.classList.add("real");
+      provBadge.textContent = meta.status === "succeeded" ? "real · succeeded" : "real";
+    }
+  }
+
+  async function loadRunsIndex() {
+    try {
+      const r = await fetch("/runs/index.json", { cache: "no-store" });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return Array.isArray(data?.runs) ? data.runs : null;
+    } catch (err) {
+      console.warn("runs/index.json unavailable", err);
+      return null;
+    }
+  }
+
+  function shortId(id) {
+    return /^[0-9a-f-]{20,}$/i.test(id) ? id.slice(0, 8) : id;
+  }
+
+  function statusGlyph(status) {
+    if (status === "succeeded") return "✓";
+    if (status === "running")   return "●";
+    if (status === "failed")    return "✕";
+    if (status === "succeeded-with-unverified-change") return "△";
+    return "·";
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes}B`;
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
+  }
+
+  function populateRunsBar(runs) {
+    if (!runs || runs.length === 0) {
+      runsBar.classList.add("empty");
+      runsSelect.innerHTML = "";
+      return;
+    }
+    runsBar.classList.remove("empty");
+    const placeholder = `<option value="" disabled${currentRunId ? "" : " selected"}>— select run —</option>`;
+    const options = runs.map(r => {
+      const path = r.path === "harness" ? "harness" : "workflow";
+      const goal = (r.goal || "").trim();
+      const goalShort = goal.length > 56 ? goal.slice(0, 56) + "…" : goal;
+      const st = r.status || "unknown";
+      const label = `${statusGlyph(st)} [${path}] ${goalShort || shortId(r.id)}`;
+      return `<option value="${escapeHtml(r.id)}" title="${escapeHtml(goal)}\n${escapeHtml(r.id)} · ${escapeHtml(st)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    runsSelect.innerHTML = placeholder + options;
+    if (currentRunId) runsSelect.value = currentRunId;
+  }
+
+  async function refreshRuns(selectRunId) {
+    const runs = await loadRunsIndex();
+    populateRunsBar(runs);
+    if (selectRunId) await loadRun(selectRunId);
+    return runs;
+  }
+
+  async function loadRun(runId, options = {}) {
+    try {
+      const [planResp, runResp, eventsResp] = await Promise.all([
+        fetch(`/runs/${encodeURIComponent(runId)}/plan.json`, { cache: "no-store" }),
+        fetch(`/runs/${encodeURIComponent(runId)}/run.json`,  { cache: "no-store" }),
+        fetch(`/runs/${encodeURIComponent(runId)}/events.jsonl`, { cache: "no-store" }),
+      ]);
+      if (!planResp.ok) throw new Error(`plan.json ${planResp.status}`);
+      if (!runResp.ok)  throw new Error(`run.json ${runResp.status}`);
+      const [plan, runMeta, eventsText] = await Promise.all([
+        planResp.json(),
+        runResp.json(),
+        eventsResp.ok ? eventsResp.text() : Promise.resolve(""),
+      ]);
+      const graph = plan.graph;
+      if (!graph || !Array.isArray(graph.nodes)) {
+        throw new Error("plan.graph missing or malformed");
+      }
+      attachOutputMetadata(graph, eventsText);
+      // overlay run.json metadata onto graph
+      graph.runId = runMeta.id || graph.runId;
+      graph.runStatus = runMeta.status || "unknown";
+      if (graph.latency === "unknown" || !graph.latency) {
+        graph.latency = runMeta.totals?.latencyMs != null
+          ? `${runMeta.totals.latencyMs}ms` : "unknown";
+      }
+      if (graph.tokens === "unknown" || !graph.tokens) {
+        graph.tokens = runMeta.totals?.tokens != null
+          ? String(runMeta.totals.tokens) : "unknown";
+      }
+
+      SAMPLES._live = graph;
+      loadSample("_live");
+      setProvenance(runMeta);
+      setCurrentRunId(runId);
+      if (!options.preserveStatus) setRunActionStatus("");
+      scheduleRunRefresh(runId, runMeta.status);
+
+      // update active button states
+      document.querySelectorAll(".sample-btn").forEach(b => b.classList.remove("active"));
+      if (runsSelect && [...runsSelect.options].some(o => o.value === runId)) {
+        runsSelect.value = runId;
+      }
+      return runMeta;
+    } catch (err) {
+      console.error("failed to load run", runId, err);
+      if (options.silent) return null;
+      setProvenance({ status: "failed", notes: `Could not load: ${err.message}` });
+      setRunActionStatus(`Load failed · ${err.message}`, "error");
+      return null;
+    }
+  }
+
+  async function waitForRunToRender(runId) {
+    setCurrentRunId(runId);
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await refreshRuns();
+      const runMeta = await loadRun(runId, { silent: true, preserveStatus: true });
+      if (runMeta) return runMeta;
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    throw new Error("run artifacts not ready");
+  }
+
+  function attachOutputMetadata(graph, eventsText) {
+    if (!eventsText) return;
+    const byId = new Map(graph.nodes.map(node => [node.id, node]));
+    eventsText.trim().split("\n").forEach(line => {
+      if (!line.trim()) return;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (event.type !== "agent.output" || !event.nodeId) return;
+      const node = byId.get(event.nodeId);
+      if (!node) return;
+      if (typeof event.artifact === "string") node.outputArtifact = event.artifact;
+      if (typeof event.preview === "string") node.outputPreview = event.preview;
+      if (typeof event.bytes === "number") node.outputBytes = event.bytes;
+    });
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || data.status || `HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  async function startRunFromGoal() {
+    const goal = goalInput.value.trim();
+    if (!goal) {
+      setRunActionStatus("Goal required", "error");
+      return;
+    }
+
+    setRunButtonsBusy(true);
+    setRunActionStatus("Starting run...");
+    try {
+      const result = await postJson("/api/runs", { goal });
+      setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`);
+      const runMeta = await waitForRunToRender(result.runId);
+      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runMeta.status === "failed" ? "error" : runMeta.status === "succeeded" ? "ok" : "");
+    } catch (err) {
+      setRunActionStatus(`Run failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  async function rerunCurrentRun() {
+    if (!currentRunId) {
+      setRunActionStatus("Select a run first", "error");
+      return;
+    }
+
+    const sourceRunId = currentRunId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Rerunning ${shortId(sourceRunId)}...`);
+    try {
+      const result = await postJson(`/api/runs/${encodeURIComponent(sourceRunId)}/rerun`, {});
+      setRunActionStatus(`Reran as ${shortId(result.runId)} · ${result.status}`);
+      const runMeta = await waitForRunToRender(result.runId);
+      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runMeta.status === "failed" ? "error" : runMeta.status === "succeeded" ? "ok" : "");
+    } catch (err) {
+      setRunActionStatus(`Rerun failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  // ============ Wiring ============
+
+  sampleBtns.forEach(b => b.addEventListener("click", () => {
+    loadSample(b.dataset.sample);
+    setProvenance(null);
+    setCurrentRunId(null);
+    setRunActionStatus("");
+    if (runsSelect) runsSelect.value = "";
+  }));
+
+  planBtn.addEventListener("click", startRunFromGoal);
+  rerunBtn.addEventListener("click", rerunCurrentRun);
+
+  runsSelect.addEventListener("change", () => {
+    if (runsSelect.value) loadRun(runsSelect.value);
+  });
+
+  resetBtn.addEventListener("click", () => loadSample(currentSample));
+
+  window.addEventListener("resize", () => {
+    requestAnimationFrame(() => renderEdges(SAMPLES[currentSample]));
+  });
+
+  // initial: render a demo immediately, then populate the runs picker.
+  loadSample("audit");
+  setProvenance(null);
+  setCurrentRunId(null);
+  loadRunsIndex().then(populateRunsBar);
+</script>
+
+</body>
+</html>

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
+    "web": "bun src/server.ts",
     "test": "bun test tests/",
     "typecheck": "bun tsc --noEmit",
     "probe:pi-agent": "bun scripts/probe-pi-agent.ts"

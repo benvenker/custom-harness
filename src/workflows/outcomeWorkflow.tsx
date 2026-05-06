@@ -150,6 +150,7 @@ export function buildOutcomeWorkflow(args: {
         `${PLANNER_SYSTEM_PROMPT}\n\n${buildPlannerPrompt(args.goal, args.context)}`,
       ),
       plan ? renderExecution({
+        ctx,
         plan,
         goal: args.goal,
         context: args.context,
@@ -174,6 +175,8 @@ export function buildOutcomeWorkflow(args: {
 }
 
 function renderExecution(args: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any;
   plan: PlannerOutput;
   goal: string;
   context?: string;
@@ -233,6 +236,8 @@ function renderWorkflowNode(
     output: unknown;
     nodeIds: Map<string, string>;
     deps: Map<string, string[]>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx: any;
   },
 ): React.ReactElement {
   if (node.type === 'task') {
@@ -251,7 +256,12 @@ function renderWorkflowNode(
         needs,
         noRetry: true,
       },
-      buildTaskPrompt({ goal: args.goal, context: args.context, task: node }),
+      buildTaskPrompt({
+        goal: args.goal,
+        context: args.context,
+        task: node,
+        upstream: upstreamTaskOutputs(upstream, args),
+      }),
     );
   }
 
@@ -272,6 +282,28 @@ function renderWorkflowNode(
   }
 
   throw new Error(`Unsupported workflow node type: ${node.type}`);
+}
+
+function upstreamTaskOutputs(
+  upstream: string[],
+  args: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx: any;
+    output: unknown;
+    recorder: RunRecorder;
+  },
+) {
+  return upstream.flatMap((from) => {
+    const row = args.ctx.latest(args.output, from) as { result?: unknown } | undefined;
+    const artifact = args.recorder.outputArtifactFor(from);
+    if (!row && !artifact) return [];
+    const result = typeof row?.result === 'string'
+      ? row.result
+      : row
+        ? JSON.stringify(row)
+        : undefined;
+    return [{ from, result, artifact }];
+  });
 }
 
 function recordingTaskAgent(nodeId: string, agent: AgentLike, recorder: RunRecorder) {
