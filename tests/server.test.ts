@@ -285,6 +285,230 @@ describe('HTTP server rerun API', () => {
   });
 });
 
+describe('HTTP server Smithers create API', () => {
+  it('starts a Smithers workflow run from workflowPath and input', async () => {
+    const runsDir = tempRunsDir();
+    const outcomeCalls: RunOutcomeOptions[] = [];
+    const smithersCalls: RunSmithersWorkflowOptions[] = [];
+    let resolveSmithers: ((result: RunSmithersWorkflowResult) => void) | null = null;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      runOutcome: async (options): Promise<RunOutcomeResult> => {
+        outcomeCalls.push(options);
+        throw new Error('planner run path should not be called for direct Smithers workflow runs');
+      },
+      runSmithersWorkflow: async (options): Promise<RunSmithersWorkflowResult> => {
+        smithersCalls.push(options);
+        return await new Promise<RunSmithersWorkflowResult>((resolve) => {
+          resolveSmithers = resolve;
+        });
+      },
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        workflowPath: '/tmp/example/.smithers/workflows/custom-code-review.tsx',
+        input: { prompt: 'Review current diff' },
+        goal: 'Custom code review experiment',
+        context: 'from workflow studio',
+        runId: 'smithers-created-run',
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      runId: 'smithers-created-run',
+      status: 'running',
+      path: 'workflow',
+    });
+    expect(outcomeCalls).toHaveLength(0);
+    expect(smithersCalls).toHaveLength(1);
+    expect(smithersCalls[0]?.workflowPath).toBe('/tmp/example/.smithers/workflows/custom-code-review.tsx');
+    expect(smithersCalls[0]?.input).toEqual({ prompt: 'Review current diff' });
+    expect(smithersCalls[0]?.goal).toBe('Custom code review experiment');
+    expect(smithersCalls[0]?.context).toBe('from workflow studio');
+    expect(smithersCalls[0]?.runId).toBe('smithers-created-run');
+    expect(smithersCalls[0]?.runsDir).toBe(runsDir);
+    expect(smithersCalls[0]?.forkedFrom).toBeUndefined();
+    expect(smithersCalls[0]?.promptOverrides).toBeUndefined();
+
+    resolveSmithers?.({
+      runId: 'smithers-created-run',
+      status: 'succeeded',
+      path: 'workflow',
+      runDir: join(runsDir, 'smithers-created-run'),
+    });
+  });
+
+  it('rejects invalid promptOverrides without starting a Smithers run', async () => {
+    const runsDir = tempRunsDir();
+    const smithersCalls: RunSmithersWorkflowOptions[] = [];
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      runSmithersWorkflow: async (options): Promise<RunSmithersWorkflowResult> => {
+        smithersCalls.push(options);
+        throw new Error('runSmithersWorkflow should not be invoked when validation fails');
+      },
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        workflowPath: '/tmp/example/.smithers/workflows/custom-code-review.tsx',
+        input: { prompt: 'Review current diff' },
+        promptOverrides: { 'resolve-source': 42 },
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('promptOverrides[resolve-source]');
+    expect(smithersCalls).toHaveLength(0);
+  });
+
+  it('forwards promptOverrides when creating a Smithers workflow run', async () => {
+    const runsDir = tempRunsDir();
+    const smithersCalls: RunSmithersWorkflowOptions[] = [];
+    let resolveSmithers: ((result: RunSmithersWorkflowResult) => void) | null = null;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      runSmithersWorkflow: async (options): Promise<RunSmithersWorkflowResult> => {
+        smithersCalls.push(options);
+        return await new Promise<RunSmithersWorkflowResult>((resolve) => {
+          resolveSmithers = resolve;
+        });
+      },
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        workflowPath: '/tmp/example/.smithers/workflows/custom-code-review.tsx',
+        input: { prompt: 'Review current diff' },
+        runId: 'smithers-created-with-overrides',
+        promptOverrides: {
+          'resolve-source': 'Resolve the source from this edited prompt.',
+          'empty-value': '   ',
+        },
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(202);
+    expect(smithersCalls).toHaveLength(1);
+    expect(smithersCalls[0]?.promptOverrides).toEqual({
+      'resolve-source': 'Resolve the source from this edited prompt.',
+    });
+
+    resolveSmithers?.({
+      runId: 'smithers-created-with-overrides',
+      status: 'succeeded',
+      path: 'workflow',
+      runDir: join(runsDir, 'smithers-created-with-overrides'),
+    });
+  });
+
+  it('requires workflowPath and input when creating a Smithers workflow run', async () => {
+    const runsDir = tempRunsDir();
+    const smithersCalls: RunSmithersWorkflowOptions[] = [];
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      runSmithersWorkflow: async (options): Promise<RunSmithersWorkflowResult> => {
+        smithersCalls.push(options);
+        throw new Error('runSmithersWorkflow should not be invoked when validation fails');
+      },
+    });
+
+    const missingWorkflowPath = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: JSON.stringify({ input: { prompt: 'Review current diff' } }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const missingInput = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: JSON.stringify({ workflowPath: '/tmp/example/.smithers/workflows/custom-code-review.tsx' }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(missingWorkflowPath.status).toBe(400);
+    expect(await missingWorkflowPath.json()).toEqual({ ok: false, error: 'Missing workflowPath' });
+    expect(missingInput.status).toBe(400);
+    expect(await missingInput.json()).toEqual({ ok: false, error: 'Missing input' });
+    expect(smithersCalls).toHaveLength(0);
+  });
+
+  it('returns a 400 for malformed JSON request bodies', async () => {
+    const runsDir = tempRunsDir();
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers-runs', {
+      method: 'POST',
+      body: '{"workflowPath":',
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('Invalid JSON');
+  });
+
+  it('keeps POST /api/runs on the planner-backed run path', async () => {
+    const runsDir = tempRunsDir();
+    const outcomeCalls: RunOutcomeOptions[] = [];
+    const smithersCalls: RunSmithersWorkflowOptions[] = [];
+    let resolveRun: ((result: RunOutcomeResult) => void) | null = null;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      runOutcome: async (options): Promise<RunOutcomeResult> => {
+        outcomeCalls.push(options);
+        return await new Promise<RunOutcomeResult>((resolve) => {
+          resolveRun = resolve;
+        });
+      },
+      runSmithersWorkflow: async (options): Promise<RunSmithersWorkflowResult> => {
+        smithersCalls.push(options);
+        throw new Error('runSmithersWorkflow should not be invoked for POST /api/runs');
+      },
+    });
+
+    const response = await handler(new Request('http://localhost/api/runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        goal: 'start this workflow',
+        runId: 'planner-run-output',
+        plan,
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(202);
+    expect(outcomeCalls).toHaveLength(1);
+    expect(outcomeCalls[0]?.goal).toBe('start this workflow');
+    expect(smithersCalls).toHaveLength(0);
+
+    resolveRun?.({
+      runId: 'planner-run-output',
+      status: 'succeeded',
+      path: 'workflow',
+      runDir: join(runsDir, 'planner-run-output'),
+    });
+  });
+});
+
 const plan: PlannerOutput = {
   path: 'workflow',
   reason: 'existing plan',

@@ -52,6 +52,19 @@ const graphMeta = {
   submittedAt: new Date('2026-05-06T00:00:00.000Z'),
 };
 
+const editableStudioMeta = {
+  studio: {
+    editable: true,
+    fields: {
+      prompt: {
+        label: 'Prompt template',
+        kind: 'multiline-text',
+        sourcePath: ['tasks', 'editable-task', 'prompt'],
+      },
+    },
+  },
+};
+
 describe('Smithers graph snapshot mapper', () => {
   it('maps Workflow -> Sequence -> Task -> Task into an ordered vertical graph', () => {
     const graph = smithersSnapshotToRenderGraph({
@@ -115,6 +128,41 @@ describe('Smithers graph snapshot mapper', () => {
     });
 
     expect(graph.edges).toContainEqual({ from: 'producer', to: 'consumer', label: 'dependsOn' });
+  });
+
+  it('preserves TaskDescriptor meta.studio as structured Smithers node metadata', () => {
+    const graph = smithersSnapshotToRenderGraph({
+      snapshot: snapshot(
+        el('smithers:workflow', { name: 'metadata' }, [
+          el('smithers:sequence', {}, [
+            el('smithers:task', { id: 'editable-task' }, [text('Editable prompt')]),
+            el('smithers:task', { id: 'plain-task' }, [text('Plain prompt')]),
+          ]),
+        ]),
+        [
+          task('editable-task', {
+            ordinal: 0,
+            label: 'Editable Task',
+            prompt: 'Editable prompt from descriptor',
+            meta: editableStudioMeta,
+          }),
+          task('plain-task', { ordinal: 1, label: 'Plain Task', prompt: 'Plain prompt from descriptor' }),
+        ],
+      ),
+      ...graphMeta,
+    });
+
+    const editableNode = graph.nodes.find((node) => node.id === 'editable-task');
+    const plainNode = graph.nodes.find((node) => node.id === 'plain-task');
+
+    expect(editableNode?.title).toBe('Editable Task');
+    expect(editableNode?.prompt).toBe('Editable prompt from descriptor');
+    expect(editableNode?.smithers?.meta).toEqual(editableStudioMeta);
+    expect(editableNode?.smithers?.meta?.studio.fields.prompt.sourcePath).toEqual(['tasks', 'editable-task', 'prompt']);
+    expect(Array.isArray(editableNode?.smithers?.meta?.studio.fields.prompt.sourcePath)).toBe(true);
+    expect(plainNode?.title).toBe('Plain Task');
+    expect(plainNode?.smithers?.meta).toBeUndefined();
+    expect(graph.edges).toContainEqual({ from: 'editable-task', to: 'plain-task', label: '' });
   });
 
   it('preserves non-task Smithers host nodes that are not reduced to layout containers', () => {

@@ -1,0 +1,13 @@
+{
+  "absorbed_entries": [
+    "adr_0001-runs-in-smithers-canonical-location",
+    "_research", 
+    "_CONTEXT",
+    "plans_alpha-workflow-authoring-and-viewer",
+    "plans_meta-smithers-editing"
+  ],
+  "last_checkpoint": "2026-05-07T10:42:00Z",
+  "version": "1.0",
+  "articles_created": 5,
+  "entries_processed": 5
+}

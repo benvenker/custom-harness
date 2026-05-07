@@ -190,14 +190,24 @@ function walkAndPatch(node: unknown, opts: WorkflowOverrideOptions): unknown {
     ? opts.promptOverrides[overrideId]
     : undefined;
 
-  const patch: Record<string, unknown> = {};
-  if (nextAgent !== undefined && nextAgent !== props.agent) patch.agent = nextAgent;
-  if (typeof promptOverride === 'string') {
-    patch.children = promptOverride;
-  } else if (nextChildren !== props.children) {
-    patch.children = nextChildren;
-  }
-  return Object.keys(patch).length > 0 ? React.cloneElement(node, patch) : node;
+  const agentChanged = nextAgent !== undefined && nextAgent !== props.agent;
+  const replacement: unknown = typeof promptOverride === 'string'
+    ? promptOverride
+    : (nextChildren !== props.children ? nextChildren : undefined);
+
+  if (!agentChanged && replacement === undefined) return node;
+
+  const patchProps: Record<string, unknown> = {};
+  if (agentChanged) patchProps.agent = nextAgent;
+
+  // Assigning `children: [...]` via cloneElement makes React treat them as a
+  // dynamic list and demand `key` props. JSX-positioned children compile to a
+  // variadic createElement call instead. Mirror that here by spreading arrays
+  // as variadic args so we don't introduce the "unique key" warning that the
+  // authored .tsx file otherwise wouldn't see.
+  if (replacement === undefined) return React.cloneElement(node, patchProps);
+  if (Array.isArray(replacement)) return React.cloneElement(node, patchProps, ...replacement);
+  return React.cloneElement(node, patchProps, replacement as never);
 }
 
 function walkChildren(children: unknown, opts: WorkflowOverrideOptions) {

@@ -313,6 +313,29 @@
     text-decoration: underline;
   }
   .fork-of-link:hover { color: var(--ink); }
+  .forks[hidden] { display: none; }
+  .forks { color: var(--workflow); }
+  .forks-list { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 4px; }
+  .fork-child {
+    background: transparent; border: 1px solid var(--workflow);
+    color: var(--workflow);
+    font: inherit;
+    padding: 1px 6px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  .fork-child:hover { background: var(--workflow); color: var(--bone); }
+  .status-open-run {
+    background: transparent; border: 1px solid currentColor;
+    color: inherit;
+    font: inherit;
+    margin-left: 6px;
+    padding: 1px 6px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  .status-open-run:hover { background: currentColor; }
+  .status-open-run:hover { color: var(--bone); }
 
   /* Studio bar (top of inspector body when a Task on a real run is selected) */
   .studio-bar {
@@ -386,6 +409,27 @@
     text-decoration: underline;
   }
   .prompt-reset:hover { color: var(--ink); }
+  .source-edit {
+    display: block;
+    width: 100%;
+    min-height: 460px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--bone-2);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+  .node-edit-note {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.4;
+    margin-top: 6px;
+  }
 
   /* provenance badge in plan strip */
   .prov {
@@ -785,6 +829,29 @@
     letter-spacing: 0.04em;
     text-transform: none;
   }
+  .explain-box {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--ink-2);
+    margin-bottom: 14px;
+  }
+  .explain-box b { color: var(--ink); font-weight: 600; }
+  .source-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--workflow);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
 
   /* timeline */
   .timeline {
@@ -925,14 +992,16 @@
   <!-- Goal strip -->
   <section class="goal-strip">
     <div class="strip-label">
-      <span class="num">00 / Goal</span>
-      <span>What outcome do you want?</span>
+      <span class="num" id="inputStepLabel">00 / Goal</span>
+      <span id="inputHelpLabel">What outcome do you want?</span>
     </div>
     <textarea class="goal-edit" id="goalInput" rows="2">Audit AGENTS.md and README.md for stale references and propose a unified rewrite.</textarea>
     <div class="goal-row">
       <div class="goal-actions">
         <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
         <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
+        <button class="btn ghost" id="runWorkflowBtn" disabled title="Start a full Smithers run from the selected workflow file">Start Full Run</button>
+        <button class="btn ghost" id="editSourceBtn" disabled title="Edit the selected .smithers/workflows/*.tsx file">Edit Source (.tsx)</button>
         <button class="btn ghost" id="resetBtn">Reset</button>
         <span class="run-action-status" id="runActionStatus"></span>
       </div>
@@ -963,6 +1032,7 @@
       <div>plan tokens <b id="planTokens">1,287</b></div>
       <div>run id <b id="runId">a3f2-bb18-91c0</b></div>
       <div class="fork-of" id="forkOfRow" hidden>fork of <button type="button" class="fork-of-link" id="forkOfLink"></button></div>
+      <div class="forks" id="forksRow" hidden>forks <span class="forks-list" id="forksList"></span></div>
     </div>
   </section>
 
@@ -1218,6 +1288,8 @@
   const inspector   = document.getElementById("inspectorContent");
   const runsSelect  = document.getElementById("runsSelect");
   const goalInput   = document.getElementById("goalInput");
+  const inputStepLabel = document.getElementById("inputStepLabel");
+  const inputHelpLabel = document.getElementById("inputHelpLabel");
   const pathPill    = document.getElementById("pathPill");
   const planReason  = document.getElementById("planReason");
   const planLatency = document.getElementById("planLatency");
@@ -1226,6 +1298,8 @@
   const execTitle   = document.getElementById("execTitle");
   const planBtn     = document.getElementById("planBtn");
   const rerunBtn    = document.getElementById("rerunBtn");
+  const runWorkflowBtn = document.getElementById("runWorkflowBtn");
+  const editSourceBtn = document.getElementById("editSourceBtn");
   const resetBtn    = document.getElementById("resetBtn");
   const runActionStatus = document.getElementById("runActionStatus");
   const sampleBtns  = document.querySelectorAll(".sample-btn");
@@ -1233,6 +1307,13 @@
   let currentSample = "audit";
   let selectedId = null;
   let currentRunId = null;
+  let currentProject = null;
+  let currentWorkflowId = null;
+  let currentWorkflowGraph = null;
+  let currentWorkflowSource = null;
+  let projectModeAvailable = false;
+  const projectNodeOutputs = new Map();
+  const projectNodeOutputTables = new Map();
   // currentRunMeta is null for demos. Real runs populate it from run.json + plan.raw.
   let currentRunMeta = null;
   // Per-run drafts of edited Task prompts. Keyed by runId, then by nodeId.
@@ -1241,6 +1322,7 @@
   // Per-run baselines (the prompt rendered by the .tsx for each node) so we can
   // tell whether a textarea value is actually "edited" relative to the run.
   const promptBaselines = new Map();
+  let studioInspectorHelperPromise = null;
   let runRefreshTimer = null;
 
   const NODE_W = 280;
@@ -1494,6 +1576,156 @@
     return promptBaselines.get(runId)?.get(nodeId);
   }
 
+  function loadStudioInspectorHelper() {
+    if (!studioInspectorHelperPromise) {
+      studioInspectorHelperPromise = import("/src/ui/studioInspector.js");
+    }
+    return studioInspectorHelperPromise;
+  }
+
+  function workflowPathForCurrentProject() {
+    if (!currentWorkflowId) return null;
+    const workflows = currentProject?.workflows;
+    if (!Array.isArray(workflows)) return `.smithers/workflows/${currentWorkflowId}.tsx`;
+    return workflows.find(workflow => workflow?.id === currentWorkflowId)?.path
+      ?? `.smithers/workflows/${currentWorkflowId}.tsx`;
+  }
+
+  function sourceValuesByPathForNode(node) {
+    const studio = node?.smithers?.meta?.studio;
+    const promptField = studio?.fields?.prompt;
+    if (!promptField || !Array.isArray(promptField.sourcePath)) return {};
+    const key = promptField.sourcePath.join(".");
+    if (typeof promptField.value === "string") return { [key]: promptField.value };
+    return {};
+  }
+
+  function buildFallbackProjectInspectorState(node) {
+    const renderedPromptPreview = {
+      label: "Rendered prompt",
+      value: node.prompt || "",
+      help: "computed from workflow source + preview input",
+    };
+    const canEditSource = Boolean(workflowPathForCurrentProject());
+    return {
+      structuredFields: [],
+      canSaveStructuredEdits: false,
+      canEditSource,
+      renderedPromptPreview,
+      actions: canEditSource ? [{ id: "edit-source", label: "Edit source", visible: true, enabled: true }] : [],
+      visibleCopy: [renderedPromptPreview.label, renderedPromptPreview.value, renderedPromptPreview.help],
+    };
+  }
+
+  function buildProjectInspectorStateSync(node) {
+    return window.__studioInspectorHelper?.buildStudioInspectorState?.({
+      mode: "project-workflow",
+      workflowId: currentWorkflowId || undefined,
+      workflowPath: workflowPathForCurrentProject() || undefined,
+      node,
+      sourceValuesByPath: sourceValuesByPathForNode(node),
+    }) ?? buildFallbackProjectInspectorState(node);
+  }
+
+  function ensureProjectInspectorState(node, selectedAtRender) {
+    if (!currentWorkflowId || !node || window.__studioInspectorHelper) return;
+    loadStudioInspectorHelper()
+      .then(helper => {
+        window.__studioInspectorHelper = helper;
+        if (currentWorkflowId && selectedId === selectedAtRender) renderInspector();
+      })
+      .catch(err => {
+        console.warn("studio inspector helper unavailable", err);
+      });
+  }
+
+  function studioAction(state, id) {
+    return state.actions?.find(action => action.id === id && action.visible);
+  }
+
+  function structuredPromptField(state) {
+    return state.structuredFields?.find(field => field.id === "prompt");
+  }
+
+  function renderProjectStructuredFields(state) {
+    const promptField = structuredPromptField(state);
+    if (!promptField) return "";
+    return `<div class="field">
+      <div class="lbl">
+        <span>${escapeHtml(promptField.label)}</span>
+        <span class="output-meta">${escapeHtml(promptField.destinationLabel)}</span>
+      </div>
+      <textarea class="val prompt-edit" id="structuredPromptArea" rows="7" spellcheck="false">${escapeHtml(promptField.value)}</textarea>
+      <div class="node-edit-note">Source-backed template value. Structured saving lands in the next slice; use Edit Source for canonical workflow changes.</div>
+    </div>`;
+  }
+
+  function renderProjectInspectorBar(state) {
+    const saveAction = studioAction(state, "save-to-workflow");
+    if (!saveAction) return "";
+    const help = saveAction.help ? ` · ${escapeHtml(saveAction.help)}` : "";
+    return `<div class="studio-bar">
+      <span class="studio-status">Structured workflow edit${help}</span>
+      <button class="btn studio-run" id="saveStructuredBtn" disabled>${escapeHtml(saveAction.label)} <span class="arrow">→</span></button>
+    </div>`;
+  }
+
+  function renderProjectPromptPreview(state, isHarness) {
+    const preview = state.renderedPromptPreview;
+    if (!preview) return "";
+    return `<div class="field">
+      <div class="lbl">
+        <span>${escapeHtml(preview.label)}</span>
+        <span class="output-meta">${escapeHtml(preview.help)}</span>
+      </div>
+      <div class="val prompt ${isHarness ? "harness" : ""}">${escapeHtml(preview.value)}</div>
+    </div>`;
+  }
+
+  function renderProjectReadOnlyNote(state) {
+    if (state.structuredFields?.length > 0) return "";
+    return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
+  }
+
+  function pretendOutputPlaceholder(node) {
+    const table = node?.smithers?.outputTableName || node?.id;
+    if (table === "concept") {
+      return JSON.stringify({
+        title: "Agentic Electron desktop app",
+        objective: "Build an Electron app with chat plus a canvas where an agent can modify predefined UI components through safe tools.",
+        constraints: ["Use Electron", "Agent edits go through restricted tools"],
+        openQuestions: ["Which UI framework should Electron use?"],
+      }, null, 2);
+    }
+    if (table === "plan") {
+      return JSON.stringify({
+        summary: "Build an Electron desktop app with an agent chat surface and UI-editing canvas.",
+        steps: ["Create the Electron shell", "Define the UI component schema", "Add safe agent tools"],
+      }, null, 2);
+    }
+    if (table === "variant") {
+      return JSON.stringify({
+        author: "Claude Code",
+        summary: "A variant implementation plan.",
+        steps: ["First concrete step", "Second concrete step"],
+        rationale: "Explain how this differs from the primary plan.",
+      }, null, 2);
+    }
+    return '{"value":"..."}';
+  }
+
+  function renderInitialWorkflowPromptEditor(node) {
+    const value = currentProjectInputText();
+    return `<div class="field">
+      <div class="lbl">
+        <span>Initial workflow prompt</span>
+        <span class="output-meta">runtime input · ctx.input.prompt</span>
+      </div>
+      <textarea class="val prompt-edit" id="initialWorkflowPromptArea" rows="7" spellcheck="false" placeholder="Describe what this workflow should handle for this run...">${escapeHtml(value)}</textarea>
+      <div class="node-edit-note">Passed to Smithers as ctx.input.prompt / ctx.input.request. Editing this re-renders prompts for the current workflow; it does not change workflow structure or source.</div>
+    </div>`;
+  }
+
   function getPromptDraft(runId, nodeId) {
     return promptDrafts.get(runId)?.get(nodeId);
   }
@@ -1526,15 +1758,21 @@
     return Object.keys(pendingOverridesForRun(runId)).length;
   }
 
+  function activeInspectorTextarea() {
+    const active = document.activeElement;
+    if (!active || !inspector.contains(active) || active.tagName !== "TEXTAREA" || !active.id) return null;
+    return active;
+  }
+
   function captureInspectorScrollState() {
     const body = inspector.querySelector(".insp-body");
-    const ta = inspector.querySelector("#promptEditArea");
+    const ta = activeInspectorTextarea();
     return {
       bodyScroll: body ? body.scrollTop : 0,
+      activeTextareaId: ta ? ta.id : null,
       taScroll: ta ? ta.scrollTop : 0,
-      taSelStart: ta && document.activeElement === ta ? ta.selectionStart : null,
-      taSelEnd: ta && document.activeElement === ta ? ta.selectionEnd : null,
-      taFocused: ta ? document.activeElement === ta : false,
+      taSelStart: ta ? ta.selectionStart : null,
+      taSelEnd: ta ? ta.selectionEnd : null,
     };
   }
 
@@ -1542,14 +1780,12 @@
     if (!state) return;
     const body = inspector.querySelector(".insp-body");
     if (body) body.scrollTop = state.bodyScroll;
-    const ta = inspector.querySelector("#promptEditArea");
+    const ta = state.activeTextareaId ? inspector.querySelector(`#${CSS.escape(state.activeTextareaId)}`) : null;
     if (ta) {
       ta.scrollTop = state.taScroll;
-      if (state.taFocused) {
-        ta.focus({ preventScroll: true });
-        if (state.taSelStart != null && state.taSelEnd != null) {
-          try { ta.setSelectionRange(state.taSelStart, state.taSelEnd); } catch {}
-        }
+      ta.focus({ preventScroll: true });
+      if (state.taSelStart != null && state.taSelEnd != null) {
+        try { ta.setSelectionRange(state.taSelStart, state.taSelEnd); } catch {}
       }
     }
   }
@@ -1568,44 +1804,74 @@
     }
 
     const isHarness = node.type === "harness-worker" || (sample.path === "harness" && node.type !== "goal" && node.type !== "planner");
-    const typeLabel = node.type === "goal"    ? "Goal · root"
+    const isProjectPreview = currentSample === "_project";
+    const typeLabel = node.type === "goal"    ? (isProjectPreview ? "Runtime input" : "Goal · root")
                     : node.type === "planner" ? "Smithers planner task"
                     : isHarness               ? "Smithers CLI agent · single task"
                                               : "Smithers task";
 
     const tlRows = buildTimelineHtml(node.timeline, isHarness, node.id);
     const selectedAtRender = node.id;
-    const editable = isEditableTask(node);
-    const draft = editable ? getPromptDraft(currentRunId, node.id) : undefined;
-    const baseline = editable ? getPromptBaseline(currentRunId, node.id) ?? node.prompt : node.prompt;
+    const isProjectInputNode = Boolean(currentWorkflowId && node.type === "goal");
+    const isProjectTask = Boolean(currentWorkflowId && node.type === "task");
+    if (isProjectTask) ensureProjectInspectorState(node, selectedAtRender);
+    const projectInspectorState = isProjectTask ? buildProjectInspectorStateSync(node) : null;
+    const editable = !isProjectTask && isEditableTask(node);
+    const editScopeId = currentRunId || "project";
+    const draft = editable ? getPromptDraft(editScopeId, node.id) : undefined;
+    const baseline = editable ? getPromptBaseline(editScopeId, node.id) ?? node.prompt : node.prompt;
     const promptValue = draft !== undefined ? draft : baseline;
     const isEditedHere = editable && draft !== undefined && draft !== baseline;
-    const pendingCount = editable ? pendingOverrideCount(currentRunId) : 0;
-    const studioBarHtml = editable
-      ? `<div class="studio-bar">
-          <span class="studio-status">${pendingCount === 0
-            ? "No edits"
-            : `<b>${pendingCount}</b> edit${pendingCount === 1 ? "" : "s"} pending`}</span>
-          <button class="btn studio-run" id="studioRunBtn"${pendingCount === 0 ? " disabled" : ""}>
-            Run with edits <span class="arrow">→</span>
-          </button>
+    const pendingCount = editable ? pendingOverrideCount(editScopeId) : 0;
+    const studioBarHtml = projectInspectorState
+      ? renderProjectInspectorBar(projectInspectorState)
+      : editable
+        ? `<div class="studio-bar">
+            <span class="studio-status">${pendingCount === 0
+              ? "No edits"
+              : `<b>${pendingCount}</b> edit${pendingCount === 1 ? "" : "s"} pending`}</span>
+            <button class="btn studio-run" id="studioRunBtn"${pendingCount === 0 ? " disabled" : ""}>
+              Run with edits <span class="arrow">→</span>
+            </button>
+          </div>`
+        : "";
+
+    const promptFieldHtml = isProjectInputNode
+      ? renderInitialWorkflowPromptEditor(node)
+      : projectInspectorState
+        ? `${renderProjectStructuredFields(projectInspectorState)}${renderProjectPromptPreview(projectInspectorState, isHarness)}${renderProjectReadOnlyNote(projectInspectorState)}`
+        : editable
+        ? `<div class="field">
+            <div class="lbl">
+              <span>Agent prompt${isEditedHere ? " · <span class='edit-pill'>edited</span>" : ""}</span>
+              ${draft !== undefined && draft !== baseline
+                ? `<button class="prompt-reset" id="promptResetBtn" title="Discard edits to this task">Reset</button>`
+                : ""}
+            </div>
+            <textarea class="val prompt-edit${isEditedHere ? " edited" : ""}" id="promptEditArea" rows="6" spellcheck="false">${escapeHtml(promptValue)}</textarea>
+          </div>`
+        : `<div class="field">
+            <div class="lbl">Agent prompt</div>
+            <div class="val prompt ${isHarness ? "harness" : ""}">${escapeHtml(node.prompt)}</div>
+          </div>`;
+
+    const outputDraft = currentWorkflowId && node.type === "task" ? projectNodeOutputs.get(node.id) : undefined;
+    const outputEditor = currentWorkflowId && node.type === "task"
+      ? `<div class="field">
+          <div class="lbl">Pretend this node output is</div>
+          <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="7" spellcheck="false" placeholder="${escapeHtml(pretendOutputPlaceholder(node))}">${escapeHtml(outputDraft ? JSON.stringify(outputDraft, null, 2) : "")}</textarea>
+          <div class="node-edit-note">Paste pretend JSON output for this task to preview downstream prompts. This does not run the task and does not write Smithers run state.</div>
+          <button class="btn studio-run" id="applyNodeOutputBtn">Apply pretend output to downstream preview <span class="arrow">→</span></button>
+          ${outputDraft ? `<button class="prompt-reset" id="clearNodeOutputBtn">Clear pretend output</button>` : ""}
         </div>`
       : "";
-
-    const promptFieldHtml = editable
-      ? `<div class="field">
-          <div class="lbl">
-            <span>Agent prompt${isEditedHere ? " · <span class='edit-pill'>edited</span>" : ""}</span>
-            ${draft !== undefined && draft !== baseline
-              ? `<button class="prompt-reset" id="promptResetBtn" title="Discard edits to this task">Reset</button>`
-              : ""}
-          </div>
-          <textarea class="val prompt-edit${isEditedHere ? " edited" : ""}" id="promptEditArea" rows="6" spellcheck="false">${escapeHtml(promptValue)}</textarea>
+    const sourceExplanation = currentWorkflowId
+      ? `<div class="explain-box">
+          <b>How to read this:</b><br>
+          <b>Input</b> renders prompts. <b>Pretend output</b> lets downstream nodes preview as if this node already produced a value. <b>Source</b> defines nodes, agents, and dependencies. This preview is not live run state.<br>
+          <button class="source-link-btn" id="sourceLinkBtn">Edit source for workflow ${escapeHtml(currentWorkflowId)}</button>
         </div>`
-      : `<div class="field">
-          <div class="lbl">Agent prompt</div>
-          <div class="val prompt ${isHarness ? "harness" : ""}">${node.prompt}</div>
-        </div>`;
+      : "";
 
     inspector.innerHTML = `
       <div class="insp-head">
@@ -1617,8 +1883,10 @@
         <div class="insp-sub">id <b>${node.id}</b> · agent <b>${node.agent}</b>${node.duration ? ` · <b>${node.duration}</b>` : ""}</div>
       </div>
       <div class="insp-body">
+        ${sourceExplanation}
         ${studioBarHtml}
         ${promptFieldHtml}
+        ${outputEditor}
         ${node.tools && node.tools.length ? `
           <div class="field">
             <div class="lbl">Tools available</div>
@@ -1636,6 +1904,38 @@
       </div>
     `;
 
+    inspector.querySelector("#sourceLinkBtn")?.addEventListener("click", openWorkflowSourceEditor);
+    inspector.querySelector("#initialWorkflowPromptArea")?.addEventListener("input", (event) => {
+      goalInput.value = event.target.value;
+      saveStoredProjectInput(currentWorkflowId, event.target.value);
+      clearTimeout(projectInputRefreshTimer);
+      projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
+    });
+    inspector.querySelector("#applyNodeOutputBtn")?.addEventListener("click", async () => {
+      const area = inspector.querySelector("#nodeOutputEditArea");
+      if (!area || !selectedId) return;
+      const text = area.value.trim();
+      if (!text) {
+        setRunActionStatus("Enter pretend output JSON before applying", "error");
+        area.focus({ preventScroll: true });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(text);
+        projectNodeOutputs.set(selectedId, parsed);
+        await refreshProjectGraphFromInput();
+        setRunActionStatus(`Applied pretend output for ${selectedId}`, "ok");
+      } catch (err) {
+        setRunActionStatus(`Output must be JSON · ${err.message}`, "error");
+      }
+    });
+    inspector.querySelector("#clearNodeOutputBtn")?.addEventListener("click", async () => {
+      if (!selectedId) return;
+      projectNodeOutputs.delete(selectedId);
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Cleared pretend output for ${selectedId}`, "ok");
+    });
+
     inspector.querySelectorAll(".tl-expand-btn").forEach(b =>
       b.addEventListener("click", () => {
         expandedNodes.add(b.dataset.node);
@@ -1652,13 +1952,13 @@
       if (ta) {
         ta.addEventListener("input", () => {
           // Track the live value; do NOT re-render mid-typing or we lose focus.
-          setPromptDraft(currentRunId, node.id, ta.value);
+          setPromptDraft(editScopeId, node.id, ta.value);
           updateStudioBar();
         });
       }
       const resetBtn = inspector.querySelector("#promptResetBtn");
       resetBtn?.addEventListener("click", () => {
-        clearPromptDraft(currentRunId, node.id);
+        clearPromptDraft(editScopeId, node.id);
         renderInspector();
       });
       const runBtn = inspector.querySelector("#studioRunBtn");
@@ -1673,21 +1973,46 @@
 
   function updateStudioBar() {
     const bar = inspector.querySelector(".studio-bar");
-    if (!bar) return;
-    const count = pendingOverrideCount(currentRunId);
+    if (!bar || currentWorkflowId) return;
+    const editScopeId = currentRunId || "project";
+    const count = pendingOverrideCount(editScopeId);
     const status = bar.querySelector(".studio-status");
     if (status) {
-      status.innerHTML = count === 0
-        ? "No edits"
-        : `<b>${count}</b> edit${count === 1 ? "" : "s"} pending`;
+      status.innerHTML = count === 0 ? "No edits" : `<b>${count}</b> edit${count === 1 ? "" : "s"} pending`;
     }
     const runBtn = bar.querySelector("#studioRunBtn");
     if (runBtn) runBtn.disabled = count === 0;
     const ta = inspector.querySelector("#promptEditArea");
     if (ta) {
-      const baseline = getPromptBaseline(currentRunId, selectedId) ?? "";
+      const baseline = getPromptBaseline(editScopeId, selectedId) ?? "";
       ta.classList.toggle("edited", ta.value !== baseline);
     }
+  }
+
+  function renderForkChildren() {
+    const row = document.getElementById("forksRow");
+    const list = document.getElementById("forksList");
+    if (!row || !list) return;
+    if (!currentRunId || !Array.isArray(cachedRunsIndex)) {
+      row.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    const children = cachedRunsIndex
+      .filter(r => r.forkedFrom === currentRunId)
+      .sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
+    if (children.length === 0) {
+      row.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    row.hidden = false;
+    list.innerHTML = children.map(r => {
+      const glyph = statusGlyph(r.status || "unknown");
+      return `<button type="button" class="fork-child" data-run="${escapeHtml(r.id)}" title="${escapeHtml(r.goal || "")}\n${escapeHtml(r.id)} · ${escapeHtml(r.status || "unknown")}">${glyph} ${escapeHtml(shortId(r.id))}</button>`;
+    }).join(" ");
+    list.querySelectorAll(".fork-child").forEach(b =>
+      b.addEventListener("click", () => loadRun(b.dataset.run)));
   }
 
   function renderForkLineage() {
@@ -1749,7 +2074,16 @@
     currentSample = key;
     const s = SAMPLES[key];
 
-    goalInput.value = s.goal;
+    if (key === "_project" && currentWorkflowId) {
+      if (inputStepLabel) inputStepLabel.textContent = "00 / Workflow";
+      if (inputHelpLabel) inputHelpLabel.textContent = "Select the Initial workflow prompt node to edit runtime input. Typing there re-renders prompts but does not change workflow structure.";
+      goalInput.placeholder = `Initial prompt is edited from the graph root node...`;
+    } else {
+      if (inputStepLabel) inputStepLabel.textContent = "00 / Goal";
+      if (inputHelpLabel) inputHelpLabel.textContent = "What outcome do you want?";
+      goalInput.value = s.goal;
+      goalInput.placeholder = "";
+    }
     pathPill.textContent = s.path;
     pathPill.classList.toggle("harness", s.path === "harness");
     planReason.textContent = s.reason;
@@ -1787,9 +2121,17 @@
   const runsBar = document.getElementById("runsBar");
   const provBadge = document.getElementById("provBadge");
 
-  function setRunActionStatus(message, kind = "") {
+  function setRunActionStatus(message, kind = "", openRunId = null) {
     if (!runActionStatus) return;
-    runActionStatus.textContent = message || "";
+    if (openRunId) {
+      runActionStatus.innerHTML = `${escapeHtml(message || "")} <button type="button" class="status-open-run" data-run="${escapeHtml(openRunId)}">view →</button>`;
+      runActionStatus.querySelector(".status-open-run")?.addEventListener("click", (e) => {
+        const id = e.currentTarget.dataset.run;
+        if (id) loadRun(id);
+      });
+    } else {
+      runActionStatus.textContent = message || "";
+    }
     runActionStatus.classList.toggle("error", kind === "error");
     runActionStatus.classList.toggle("ok", kind === "ok");
   }
@@ -1802,14 +2144,23 @@
         : "";
   }
 
+  function canRunWorkflow() {
+    return Boolean(currentRunMeta?.isSmithersWorkflow || currentWorkflowId);
+  }
+
   function setRunButtonsBusy(isBusy) {
-    planBtn.disabled = isBusy;
-    rerunBtn.disabled = isBusy || !currentRunId;
+    planBtn.disabled = isBusy || projectModeAvailable;
+    rerunBtn.disabled = isBusy || projectModeAvailable || !currentRunId;
+    if (runWorkflowBtn) runWorkflowBtn.disabled = isBusy || !canRunWorkflow();
+    if (editSourceBtn) editSourceBtn.disabled = isBusy || !currentWorkflowId;
   }
 
   function setCurrentRunId(runId) {
     currentRunId = runId;
-    rerunBtn.disabled = !currentRunId;
+    planBtn.disabled = projectModeAvailable;
+    rerunBtn.disabled = projectModeAvailable || !currentRunId;
+    if (runWorkflowBtn) runWorkflowBtn.disabled = !canRunWorkflow();
+    if (editSourceBtn) editSourceBtn.disabled = !currentWorkflowId;
   }
 
   function scheduleRunRefresh(runId, status) {
@@ -1856,12 +2207,16 @@
     }
   }
 
+  let cachedRunsIndex = [];
+
   async function loadRunsIndex() {
     try {
       const r = await fetch("/runs/index.json", { cache: "no-store" });
       if (!r.ok) return null;
       const data = await r.json();
-      return Array.isArray(data?.runs) ? data.runs : null;
+      const runs = Array.isArray(data?.runs) ? data.runs : null;
+      if (runs) cachedRunsIndex = runs;
+      return runs;
     } catch (err) {
       console.warn("runs/index.json unavailable", err);
       return null;
@@ -1908,6 +2263,7 @@
   async function refreshRuns(selectRunId) {
     const runs = await loadRunsIndex();
     populateRunsBar(runs);
+    renderForkChildren();
     if (selectRunId) await loadRun(selectRunId);
     return runs;
   }
@@ -1949,9 +2305,11 @@
       const isSmithersWorkflow = source?.kind === "smithers";
       currentRunMeta = {
         id: runMeta.id,
+        goal: runMeta.goal ?? null,
         forkedFrom: runMeta.forkedFrom ?? null,
         isSmithersWorkflow,
         workflowPath: isSmithersWorkflow ? source.workflowPath : null,
+        input: isSmithersWorkflow && source.input && typeof source.input === "object" ? source.input : null,
         existingOverrides: isSmithersWorkflow ? (source.promptOverrides ?? {}) : {},
       };
       // Seed baselines so we can tell "edited vs original" for this run's tasks.
@@ -1978,6 +2336,7 @@
         runsSelect.value = runId;
       }
       renderForkLineage();
+      renderForkChildren();
       return runMeta;
     } catch (err) {
       console.error("failed to load run", runId, err);
@@ -2019,9 +2378,9 @@
     });
   }
 
-  async function postJson(url, payload) {
+  async function postJson(url, payload, method = "POST") {
     const response = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload || {}),
     });
@@ -2053,7 +2412,73 @@
     }
   }
 
+  async function runWorkflowFresh() {
+    if (currentWorkflowId) {
+      setRunButtonsBusy(true);
+      setRunActionStatus(`Starting ${currentWorkflowId} through Smithers...`);
+      try {
+        const input = currentProjectInput();
+        const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/run`, { input });
+        setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`, runStatusKind(result.status));
+        runIdEl.textContent = result.runId;
+        if (currentWorkflowGraph) {
+          currentWorkflowGraph.runId = result.runId;
+          currentWorkflowGraph.runStatus = result.status;
+          SAMPLES._project = currentWorkflowGraph;
+          loadSample("_project");
+        }
+      } catch (err) {
+        setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
+      } finally {
+        setRunButtonsBusy(false);
+      }
+      return;
+    }
+
+    if (!currentRunMeta?.isSmithersWorkflow || !currentRunMeta.workflowPath) {
+      setRunActionStatus("Load a Smithers workflow run first", "error");
+      return;
+    }
+    const sourceRunId = currentRunId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Starting fresh run from ${currentRunMeta.workflowPath.split("/").pop()}...`);
+    try {
+      // Bundle any pending studio edits with whatever overrides the parent
+      // already had baked in. New (drafts) win over inherited.
+      const drafts = sourceRunId ? pendingOverridesForRun(sourceRunId) : {};
+      const inherited = currentRunMeta.existingOverrides ?? {};
+      const merged = { ...inherited, ...drafts };
+      const promptOverrides = Object.keys(merged).length > 0 ? merged : undefined;
+
+      const payload = {
+        workflowPath: currentRunMeta.workflowPath,
+        input: currentRunMeta.input ?? {},
+        ...(currentRunMeta.goal ? { goal: currentRunMeta.goal } : {}),
+        ...(promptOverrides ? { promptOverrides } : {}),
+      };
+      const result = await postJson("/api/smithers-runs", payload);
+      // Drafts on the source run are what we just shipped; clear them so the
+      // studio bar resets if the user returns to the parent.
+      if (sourceRunId) promptDrafts.delete(sourceRunId);
+      setRunActionStatus(`Started ${shortId(result.runId)} · loading...`);
+      // RUN WORKFLOW means "start a fresh experiment" — auto-switch to the new
+      // run so the user actually sees something change. (Rerun Selected stays
+      // sticky because that fork's task states would look like regressions.)
+      const runMeta = await waitForRunToRender(result.runId);
+      setRunActionStatus(`${shortId(result.runId)} · ${runMeta.status}`,
+        runStatusKind(runMeta.status));
+    } catch (err) {
+      setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
   async function rerunCurrentRun() {
+    if (projectModeAvailable) {
+      setRunActionStatus("Rerun Selected is for legacy runs. Use Start Full Run for this Smithers workflow.", "error");
+      return;
+    }
     if (!currentRunId) {
       setRunActionStatus("Select a run first", "error");
       return;
@@ -2070,8 +2495,9 @@
       // Refresh the dropdown so the new id is selectable, and tell the user
       // it's there.
       await refreshRuns();
-      setRunActionStatus(`Forked as ${shortId(result.runId)} · open from Runs ▾`,
-        result.status === "failed" ? "error" : "ok");
+      setRunActionStatus(`Forked as ${shortId(result.runId)} ·`,
+        result.status === "failed" ? "error" : "ok",
+        result.runId);
     } catch (err) {
       setRunActionStatus(`Rerun failed · ${err.message}`, "error");
       await refreshRuns();
@@ -2083,20 +2509,206 @@
     }
   }
 
+  function renderSourceEditor() {
+    selectedId = "__source";
+    [...canvasInner.querySelectorAll(".node")].forEach(n => n.classList.remove("selected"));
+    inspector.innerHTML = `
+      <div class="insp-head">
+        <div class="insp-eyebrow">
+          <span><b>Smithers workflow source</b></span>
+          <span>${escapeHtml(currentWorkflowId || "")}</span>
+        </div>
+        <h3 class="insp-title">Edit .smithers workflow</h3>
+        <div class="insp-sub">Saving writes the workflow .tsx file, then re-renders the preview graph.</div>
+      </div>
+      <div class="insp-body">
+        <div class="studio-bar">
+          <span class="studio-status">Source edit · canonical Smithers file</span>
+          <button class="btn studio-run" id="saveSourceBtn">Save + re-render <span class="arrow">→</span></button>
+        </div>
+        <div class="field">
+          <div class="lbl">Workflow source</div>
+          <textarea class="source-edit" id="sourceEditArea" spellcheck="false">${escapeHtml(currentWorkflowSource || "")}</textarea>
+        </div>
+      </div>
+    `;
+    inspector.querySelector("#saveSourceBtn")?.addEventListener("click", saveWorkflowSource);
+  }
+
+  async function openWorkflowSourceEditor() {
+    if (!currentWorkflowId) return;
+    setRunActionStatus(`Loading source for ${currentWorkflowId}...`);
+    try {
+      const data = await fetch(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source`, { cache: "no-store" }).then(r => r.json());
+      if (data.ok === false) throw new Error(data.error || "source load failed");
+      currentWorkflowSource = data.source || "";
+      renderSourceEditor();
+      setRunActionStatus(`Editing ${currentWorkflowId}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Source load failed · ${err.message}`, "error");
+    }
+  }
+
+  async function saveWorkflowSource() {
+    if (!currentWorkflowId) return;
+    const area = inspector.querySelector("#sourceEditArea");
+    if (!area) return;
+    const source = area.value;
+    setRunActionStatus(`Saving ${currentWorkflowId}...`);
+    try {
+      const saved = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source`, { source }, "PUT");
+      currentWorkflowSource = source;
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${saved.workflowId} · preview re-rendered`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Save failed · ${err.message}`, "error");
+    }
+  }
+
+  async function loadProjectWorkflowMode() {
+    try {
+      const project = await fetch("/api/project", { cache: "no-store" }).then(r => r.ok ? r.json() : null);
+      if (!project || project.ok === false) {
+        if (project?.status === "setup-needed") setRunActionStatus(project.error || "Smithers setup needed", "error");
+        return false;
+      }
+      const workflows = await fetch("/api/workflows", { cache: "no-store" }).then(r => r.json());
+      if (workflows.ok === false) {
+        setRunActionStatus(workflows.error || "Could not load workflows", "error");
+        return false;
+      }
+      const selected = project.defaultWorkflowId
+        || workflows.workflows?.[0]?.id;
+      if (!selected) return false;
+      goalInput.value = loadStoredProjectInput(selected);
+      const graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      if (graphResponse.ok === false) {
+        setRunActionStatus(graphResponse.error || "Could not render workflow graph", "error");
+        return false;
+      }
+      projectModeAvailable = true;
+      currentProject = { ...project, workflows: workflows.workflows ?? [] };
+      currentWorkflowId = selected;
+      currentWorkflowGraph = graphResponse.graph;
+      rememberProjectOutputTables(graphResponse.graph);
+      SAMPLES._project = graphResponse.graph;
+      loadSample("_project");
+      goalInput.placeholder = `Initial prompt is edited from the graph root node...`;
+      setProvenance({ status: "project" });
+      currentRunMeta = null;
+      setCurrentRunId(null);
+      planBtn.disabled = true;
+      rerunBtn.disabled = true;
+      if (runWorkflowBtn) runWorkflowBtn.disabled = false;
+      if (editSourceBtn) editSourceBtn.disabled = false;
+      runsBar.classList.add("empty");
+      runsSelect.innerHTML = "";
+      setRunActionStatus(`Loaded ${selected} from ${project.projectRoot}`, "ok");
+      return true;
+    } catch (err) {
+      console.warn("project workflow mode unavailable", err);
+      return false;
+    }
+  }
+
+  function projectInputStorageKey(workflowId) {
+    return workflowId ? `custom-harness:project-input:${workflowId}` : null;
+  }
+
+  function loadStoredProjectInput(workflowId) {
+    const key = projectInputStorageKey(workflowId);
+    if (!key) return "";
+    try { return localStorage.getItem(key) || ""; } catch { return ""; }
+  }
+
+  function saveStoredProjectInput(workflowId, value) {
+    const key = projectInputStorageKey(workflowId);
+    if (!key) return;
+    try { localStorage.setItem(key, value); } catch {}
+  }
+
+  function currentProjectInputText() {
+    return goalInput.value;
+  }
+
+  function currentProjectInput() {
+    const requestText = currentProjectInputText();
+    console.log("[project-input]", requestText);
+    return requestText.trim() ? { request: requestText, prompt: requestText } : {};
+  }
+
+  function rememberProjectOutputTables(graph) {
+    if (!graph?.nodes) return;
+    for (const node of graph.nodes) {
+      const table = node?.smithers?.outputTableName;
+      if (node?.id && typeof table === "string" && table) projectNodeOutputTables.set(node.id, table);
+    }
+  }
+
+  function currentProjectOutputs() {
+    const out = {};
+    for (const [nodeId, value] of projectNodeOutputs) {
+      const table = projectNodeOutputTables.get(nodeId) || nodeId;
+      if (!out[table]) out[table] = [];
+      out[table].push({ nodeId, iteration: 0, ...(value && typeof value === "object" ? value : { value }) });
+    }
+    return out;
+  }
+
+  function projectGraphUrl(workflowId) {
+    const input = currentProjectInput();
+    const outputs = currentProjectOutputs();
+    const params = new URLSearchParams();
+    if (Object.keys(input).length > 0) params.set("input", JSON.stringify(input));
+    if (Object.keys(outputs).length > 0) params.set("outputs", JSON.stringify(outputs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return `/api/workflows/${encodeURIComponent(workflowId)}/graph${query}`;
+  }
+
+  async function refreshProjectGraphFromInput() {
+    if (!currentWorkflowId) return;
+    try {
+      const graphResponse = await fetch(projectGraphUrl(currentWorkflowId), { cache: "no-store" }).then(r => r.json());
+      if (graphResponse.ok === false) throw new Error(graphResponse.error || "graph render failed");
+      currentWorkflowGraph = graphResponse.graph;
+      rememberProjectOutputTables(graphResponse.graph);
+      SAMPLES._project = graphResponse.graph;
+      loadSample("_project");
+      setRunActionStatus(`Preview updated for ${currentWorkflowId}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Preview failed · ${err.message}`, "error");
+    }
+  }
+
+  let projectInputRefreshTimer = null;
+  goalInput.addEventListener("input", () => {
+    if (!currentWorkflowId) return;
+    saveStoredProjectInput(currentWorkflowId, goalInput.value);
+    clearTimeout(projectInputRefreshTimer);
+    projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
+  });
+
   // ============ Wiring ============
 
   sampleBtns.forEach(b => b.addEventListener("click", () => {
+    projectModeAvailable = false;
     loadSample(b.dataset.sample);
     setProvenance(null);
+    // Clear the meta first so the button-enable logic in setCurrentRunId sees
+    // "no workflow loaded" and disables Run Workflow.
+    currentRunMeta = null;
+    currentWorkflowId = null;
     setCurrentRunId(null);
     setRunActionStatus("");
     if (runsSelect) runsSelect.value = "";
-    currentRunMeta = null;
     renderForkLineage();
+    renderForkChildren();
   }));
 
   planBtn.addEventListener("click", startRunFromGoal);
   rerunBtn.addEventListener("click", rerunCurrentRun);
+  runWorkflowBtn?.addEventListener("click", runWorkflowFresh);
+  editSourceBtn?.addEventListener("click", openWorkflowSourceEditor);
 
   runsSelect.addEventListener("change", () => {
     if (runsSelect.value) loadRun(runsSelect.value);
@@ -2117,11 +2729,15 @@
     requestAnimationFrame(() => renderEdges(SAMPLES[currentSample]));
   });
 
-  // initial: render a demo immediately, then populate the runs picker.
-  loadSample("audit");
-  setProvenance(null);
-  setCurrentRunId(null);
-  loadRunsIndex().then(populateRunsBar);
+  // initial: prefer project workflow mode, then fall back to demo + legacy runs picker.
+  loadProjectWorkflowMode().then((loaded) => {
+    if (loaded) return;
+    projectModeAvailable = false;
+    loadSample("audit");
+    setProvenance(null);
+    setCurrentRunId(null);
+    loadRunsIndex().then(populateRunsBar);
+  });
 </script>
 
 </body>

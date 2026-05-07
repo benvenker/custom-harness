@@ -32,6 +32,7 @@ export type RenderNode = {
     props?: Record<string, string>;
     nodeId?: string;
     ordinal?: number;
+    outputTableName?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;
     needsApproval?: boolean;
@@ -39,6 +40,7 @@ export type RenderNode = {
     worktreeId?: string;
     worktreePath?: string;
     parallelGroupId?: string;
+    meta?: Record<string, unknown>;
   };
 };
 
@@ -190,6 +192,7 @@ function layoutSmithersElement(
         props: element.props,
         nodeId: id,
         ordinal: descriptor?.ordinal,
+        outputTableName: descriptor?.outputTableName,
         dependsOn: descriptor?.dependsOn,
         needs: descriptor?.needs,
         needsApproval: descriptor?.needsApproval,
@@ -197,6 +200,7 @@ function layoutSmithersElement(
         worktreeId: descriptor?.worktreeId,
         worktreePath: descriptor?.worktreePath,
         parallelGroupId: descriptor?.parallelGroupId,
+        meta: descriptor?.meta,
       },
     };
     return { nodes: [node], edges: [], entries: [id], exits: [id], maxRow: args.row, rootKind: 'task' };

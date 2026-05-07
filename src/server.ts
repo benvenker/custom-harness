@@ -1,22 +1,43 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
+import type { GraphSnapshot } from '@smithers-orchestrator/graph';
 import { runOutcome, type RunOutcomeOptions, type RunOutcomeResult } from './app/runOutcome.js';
 import {
   runSmithersWorkflow,
   type RunSmithersWorkflowOptions,
   type RunSmithersWorkflowResult,
 } from './app/runSmithersWorkflow.js';
+import { loadSmithersRuntime, loadWorkflow } from './app/smithersRuntime.js';
 import { depsFromEnv } from './cli.js';
 import { planSchema, type PlannerOutput } from './planning/schema.js';
+import { smithersSnapshotToRenderGraph } from './runs/smithersGraph.js';
 
 type RunOutcomeFn = (options: RunOutcomeOptions) => Promise<RunOutcomeResult>;
 type RunSmithersWorkflowFn = (options: RunSmithersWorkflowOptions) => Promise<RunSmithersWorkflowResult>;
+type RenderProjectWorkflowGraphFn = (options: {
+  projectRoot: string;
+  workflowId: string;
+  workflowPath: string;
+  input?: Record<string, unknown>;
+  outputs?: Record<string, unknown[]>;
+}) => Promise<GraphSnapshot>;
+type RunProjectWorkflowFn = (options: {
+  projectRoot: string;
+  workflowId: string;
+  workflowPath: string;
+  input: Record<string, unknown>;
+  promptOverrides?: Record<string, string>;
+}) => Promise<{ runId: string; status: string }>;
 
 export type HarnessServerOptions = {
   rootDir?: string;
   runsDir?: string;
+  projectRoot?: string;
+  workflowId?: string;
   runOutcome?: RunOutcomeFn;
   runSmithersWorkflow?: RunSmithersWorkflowFn;
+  renderProjectWorkflowGraph?: RenderProjectWorkflowGraphFn;
+  runProjectWorkflow?: RunProjectWorkflowFn;
 };
 
 type RunJson = {
@@ -43,8 +64,12 @@ type SmithersGraphExportPlan = {
 export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
   const rootDir = resolve(options.rootDir ?? process.cwd());
   const runsDir = options.runsDir ?? process.env.CUSTOM_HARNESS_RUNS_DIR ?? 'runs';
+  const projectRoot = options.projectRoot ? resolve(options.projectRoot) : undefined;
+  const defaultWorkflowId = options.workflowId;
   const runOutcomeFn = options.runOutcome ?? runOutcome;
   const runSmithersWorkflowFn = options.runSmithersWorkflow ?? runSmithersWorkflow;
+  const renderProjectWorkflowGraphFn = options.renderProjectWorkflowGraph ?? renderProjectWorkflowGraph;
+  const runProjectWorkflowFn = options.runProjectWorkflow ?? runProjectWorkflow;
 
   return async function handle(request: Request): Promise<Response> {
     try {
@@ -63,21 +88,110 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
         });
       }
 
+      if (request.method === 'POST' && url.pathname === '/api/smithers-runs') {
+        return await startSmithersRun({ request, runsDir, runSmithersWorkflow: runSmithersWorkflowFn });
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/runs') {
         return await startRun({ request, runsDir, runOutcome: runOutcomeFn });
+      }
+
+      const workflowRunMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/run$/);
+      if (request.method === 'POST' && workflowRunMatch) {
+        return await workflowRunResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          workflowId: decodeURIComponent(workflowRunMatch[1]),
+          runProjectWorkflow: runProjectWorkflowFn,
+        });
+      }
+
+      const workflowSourceMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/source$/);
+      if (request.method === 'PUT' && workflowSourceMatch) {
+        return await workflowSourceResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          workflowId: decodeURIComponent(workflowSourceMatch[1]),
+          write: true,
+        });
       }
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return json({ ok: false, error: 'Method not allowed' }, 405);
       }
 
+      if (url.pathname === '/api/project') {
+        return json(projectResponse({ projectRoot, defaultWorkflowId }));
+      }
+
+      if (url.pathname === '/api/workflows') {
+        return json(workflowsResponse({ projectRoot, defaultWorkflowId }));
+      }
+
+      const graphMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/graph$/);
+      if (graphMatch) {
+        return await workflowGraphResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          workflowId: decodeURIComponent(graphMatch[1]),
+          renderProjectWorkflowGraph: renderProjectWorkflowGraphFn,
+        });
+      }
+
+      const sourceMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/source$/);
+      if (sourceMatch) {
+        return await workflowSourceResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          workflowId: decodeURIComponent(sourceMatch[1]),
+          write: false,
+        });
+      }
+
       if (url.pathname === '/favicon.ico') return new Response(null, { status: 204 });
       return staticFileResponse(rootDir, url.pathname);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return json({ ok: false, error: message }, 500);
+      const status = error instanceof RequestValidationError ? 400 : 500;
+      return json({ ok: false, error: message }, status);
     }
   };
+}
+
+async function startSmithersRun(args: {
+  request: Request;
+  runsDir: string;
+  runSmithersWorkflow: RunSmithersWorkflowFn;
+}) {
+  const body = await readJsonBody(args.request);
+  if (typeof body.workflowPath !== 'string' || body.workflowPath.trim() === '') {
+    return json({ ok: false, error: 'Missing workflowPath' }, 400);
+  }
+  if (!isRecord(body.input)) {
+    return json({ ok: false, error: 'Missing input' }, 400);
+  }
+
+  const runId = typeof body.runId === 'string' ? body.runId : crypto.randomUUID();
+  const promptOverrides = parsePromptOverrides(body.promptOverrides);
+  launchSmithersRun(args.runSmithersWorkflow, {
+    workflowPath: body.workflowPath,
+    input: body.input,
+    goal: typeof body.goal === 'string' && body.goal.trim() ? body.goal : undefined,
+    context: typeof body.context === 'string' ? body.context : undefined,
+    ...(promptOverrides === undefined ? {} : { promptOverrides }),
+    runId,
+    runsDir: args.runsDir,
+  });
+  return json({
+    ok: true,
+    runId,
+    status: 'running',
+    path: 'workflow',
+  }, 202);
 }
 
 async function rerunRun(args: {
@@ -138,10 +252,10 @@ async function rerunRun(args: {
 
 function parsePromptOverrides(value: unknown): Record<string, string> | undefined {
   if (value === undefined || value === null) return undefined;
-  if (!isRecord(value)) throw new Error('promptOverrides must be a JSON object of string→string');
+  if (!isRecord(value)) throw new RequestValidationError('promptOverrides must be a JSON object of string-to-string values');
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw !== 'string') throw new Error(`promptOverrides[${key}] must be a string`);
+    if (typeof raw !== 'string') throw new RequestValidationError(`promptOverrides[${key}] must be a string`);
     if (!key.trim()) continue;
     if (raw.trim()) out[key] = raw;
   }
@@ -235,19 +349,299 @@ function isSmithersGraphExportPlan(value: unknown): value is SmithersGraphExport
   return true;
 }
 
+function projectResponse(args: { projectRoot?: string; defaultWorkflowId?: string }) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return setup;
+  return {
+    ok: true,
+    projectRoot: setup.projectRoot,
+    smithersDir: setup.smithersDir,
+    defaultWorkflowId: args.defaultWorkflowId,
+  };
+}
+
+function workflowsResponse(args: { projectRoot?: string; defaultWorkflowId?: string }) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return setup;
+  return {
+    ok: true,
+    projectRoot: setup.projectRoot,
+    smithersDir: setup.smithersDir,
+    defaultWorkflowId: args.defaultWorkflowId,
+    workflows: discoverProjectWorkflows(setup.projectRoot),
+  };
+}
+
+function projectSetup(args: { projectRoot?: string; defaultWorkflowId?: string }) {
+  if (!args.projectRoot) {
+    return { ok: false as const, status: 'setup-needed', error: 'Missing --project for project workflow viewer' };
+  }
+  const smithersDir = join(args.projectRoot, '.smithers');
+  if (!existsSync(smithersDir)) {
+    return {
+      ok: false as const,
+      status: 'setup-needed',
+      projectRoot: args.projectRoot,
+      smithersDir,
+      defaultWorkflowId: args.defaultWorkflowId,
+      error: `Smithers setup needed: ${smithersDir} does not exist`,
+    };
+  }
+  return { ok: true as const, projectRoot: args.projectRoot, smithersDir };
+}
+
+function discoverProjectWorkflows(projectRoot: string) {
+  const workflowsDir = join(projectRoot, '.smithers', 'workflows');
+  if (!existsSync(workflowsDir)) return [];
+  return readdirSync(workflowsDir)
+    .filter((file) => file.endsWith('.tsx'))
+    .map((file) => file.slice(0, -'.tsx'.length))
+    .filter((id) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))
+    .sort((a, b) => a.localeCompare(b))
+    .map((id) => ({ id, path: join(workflowsDir, `${id}.tsx`) }));
+}
+
+async function workflowGraphResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  workflowId: string;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  const workflow = discoverProjectWorkflows(setup.projectRoot).find((candidate) => candidate.id === args.workflowId);
+  if (!workflow) return json({ ok: false, error: `Workflow not found: ${args.workflowId}` }, 404);
+
+  const url = new URL(args.request.url);
+  const inputParam = url.searchParams.get('input');
+  const outputsParam = url.searchParams.get('outputs');
+  const input = inputParam ? parseJsonObject(inputParam, 'input') : {};
+  const outputs = outputsParam ? parseJsonOutputs(outputsParam) : {};
+  console.log('[project-graph]', workflow.id, input, outputs);
+  const snapshot = await args.renderProjectWorkflowGraph({
+    projectRoot: setup.projectRoot,
+    workflowId: workflow.id,
+    workflowPath: workflow.path,
+    input,
+    outputs,
+  });
+  const graph = smithersSnapshotToRenderGraph({
+    snapshot,
+    goal: projectInputPrompt(input) || `No initial workflow prompt yet.`,
+    path: 'workflow',
+    reason: 'Rendered Smithers workflow graph without executing tasks.',
+    runId: snapshot.runId,
+    planningLatencyMs: null,
+    tokens: null,
+    submittedAt: new Date(),
+  });
+  applyProjectWorkflowInputNode(graph, workflow.id, input);
+  return json({ ok: true, workflowId: workflow.id, workflowPath: workflow.path, graph });
+}
+
+function projectInputPrompt(input: Record<string, unknown>) {
+  const prompt = input.prompt ?? input.request;
+  return typeof prompt === 'string' ? prompt.trim() : '';
+}
+
+function applyProjectWorkflowInputNode(
+  graph: ReturnType<typeof smithersSnapshotToRenderGraph>,
+  workflowId: string,
+  input: Record<string, unknown>,
+) {
+  const prompt = projectInputPrompt(input);
+  const inputNode = graph.nodes.find((node) => node.id === 'goal');
+  if (!inputNode) return;
+  inputNode.title = 'Initial workflow prompt';
+  inputNode.agent = 'ctx.input.prompt';
+  inputNode.prompt = prompt || 'No initial workflow prompt yet. Select this node to add runtime input.';
+  inputNode.smithers = {
+    kind: 'input',
+    tag: 'custom-harness:workflow-input',
+    props: { workflowId },
+  };
+  graph.goal = inputNode.prompt;
+  graph.defaultSelected = 'goal';
+}
+
+async function workflowSourceResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  workflowId: string;
+  write: boolean;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  const workflow = discoverProjectWorkflows(setup.projectRoot).find((candidate) => candidate.id === args.workflowId);
+  if (!workflow) return json({ ok: false, error: `Workflow not found: ${args.workflowId}` }, 404);
+
+  if (!args.write) {
+    return json({ ok: true, workflowId: workflow.id, workflowPath: workflow.path, source: readFileSync(workflow.path, 'utf8') });
+  }
+
+  const body = await readJsonBody(args.request);
+  if (typeof body.source !== 'string') return json({ ok: false, error: 'source must be a string' }, 400);
+  writeFileSync(workflow.path, body.source);
+  return json({ ok: true, workflowId: workflow.id, workflowPath: workflow.path });
+}
+
+async function workflowRunResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  workflowId: string;
+  runProjectWorkflow: RunProjectWorkflowFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  const workflow = discoverProjectWorkflows(setup.projectRoot).find((candidate) => candidate.id === args.workflowId);
+  if (!workflow) return json({ ok: false, error: `Workflow not found: ${args.workflowId}` }, 404);
+  const body = await readJsonBody(args.request);
+  const input = body.input === undefined ? {} : body.input;
+  if (!isRecord(input)) return json({ ok: false, error: 'input must be a JSON object' }, 400);
+  const promptOverrides = parsePromptOverrides(body.promptOverrides);
+
+  const result = await args.runProjectWorkflow({
+    projectRoot: setup.projectRoot,
+    workflowId: workflow.id,
+    workflowPath: workflow.path,
+    input,
+    ...(promptOverrides === undefined ? {} : { promptOverrides }),
+  });
+  return json({ ok: true, runId: result.runId, status: result.status }, 202);
+}
+
+async function renderProjectWorkflowGraph(options: {
+  projectRoot: string;
+  workflowId: string;
+  workflowPath: string;
+  input?: Record<string, unknown>;
+  outputs?: Record<string, unknown[]>;
+}): Promise<GraphSnapshot> {
+  return await withCwd(options.projectRoot, async () => {
+    const workflow = await loadWorkflow(options.workflowPath);
+    const runtime = await loadSmithersRuntime(options.workflowPath);
+    const runId = `custom-harness-graph-${crypto.randomUUID()}`;
+    const ctx = new runtime.SmithersCtx({
+      runId,
+      iteration: 0,
+      input: options.input ?? {},
+      outputs: options.outputs ?? {},
+      zodToKeyName: workflow.zodToKeyName,
+    });
+    return await runtime.runPromise(
+      runtime.renderFrame(workflow as never, ctx, {
+        baseRootDir: options.projectRoot,
+        workflowPath: options.workflowPath,
+      }),
+    ) as GraphSnapshot;
+  });
+}
+
+async function runProjectWorkflow(options: {
+  projectRoot: string;
+  workflowId: string;
+  workflowPath: string;
+  input: Record<string, unknown>;
+  promptOverrides?: Record<string, string>;
+}): Promise<{ runId: string; status: string }> {
+  if (options.promptOverrides && Object.keys(options.promptOverrides).length > 0) {
+    const result = await runSmithersWorkflow({
+      workflowPath: options.workflowPath,
+      input: options.input,
+      runId: crypto.randomUUID(),
+      promptOverrides: options.promptOverrides,
+    });
+    return { runId: result.runId, status: result.status };
+  }
+
+  mkdirSync(join(options.projectRoot, '.smithers', 'executions'), { recursive: true });
+  const proc = Bun.spawn([
+    'bun',
+    'node_modules/.bin/smithers',
+    'workflow',
+    'run',
+    options.workflowId,
+    '--input',
+    JSON.stringify(options.input),
+    '--detach',
+    '--format',
+    'json',
+    '--root',
+    '.',
+    '--log-dir',
+    '.smithers/executions',
+  ], {
+    cwd: options.projectRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`Smithers workflow run failed with exit ${exitCode}: ${stderr || stdout}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Smithers workflow run returned invalid JSON: ${message}; stdout=${stdout}; stderr=${stderr}`);
+  }
+  if (!isRecord(parsed) || typeof parsed.runId !== 'string') {
+    throw new Error(`Smithers workflow run response missing runId: ${stdout}`);
+  }
+  return { runId: parsed.runId, status: typeof parsed.status === 'string' ? parsed.status : 'running' };
+}
+
+async function withCwd<T>(cwd: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.cwd();
+  process.chdir(cwd);
+  try {
+    return await fn();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function parseJsonObject(text: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RequestValidationError(`Invalid JSON ${label}: ${message}`);
+  }
+  if (!isRecord(parsed)) throw new RequestValidationError(`${label} must be a JSON object`);
+  return parsed;
+}
+
+function parseJsonOutputs(text: string): Record<string, unknown[]> {
+  const parsed = parseJsonObject(text, 'outputs');
+  const out: Record<string, unknown[]> = {};
+  for (const [table, rows] of Object.entries(parsed)) {
+    if (!Array.isArray(rows)) throw new RequestValidationError(`outputs.${table} must be an array`);
+    out[table] = rows;
+  }
+  return out;
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
   const text = await request.text();
   if (!text.trim()) return {};
-  const parsed = JSON.parse(text);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Request body must be a JSON object');
-  }
-  return parsed as Record<string, unknown>;
+  return parseJsonObject(text, 'request body');
 }
+
+class RequestValidationError extends Error {}
 
 function staticFileResponse(rootDir: string, pathname: string) {
   const requested = pathname === '/' ? '/web/index.html' : pathname;
@@ -311,9 +705,10 @@ function json(value: unknown, status = 200) {
 
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 4321);
+  const cliOptions = parseServerArgs(process.argv.slice(2));
   const server = Bun.serve({
     port,
-    fetch: createHarnessServerHandler(),
+    fetch: createHarnessServerHandler(cliOptions),
   });
   process.on('SIGINT', () => {
     server.stop();
@@ -324,5 +719,32 @@ if (import.meta.main) {
     process.exit(0);
   });
   console.log(`custom-harness web server listening on http://localhost:${port}`);
+  if (cliOptions.projectRoot) {
+    console.log(`project workflow viewer: ${cliOptions.projectRoot}${cliOptions.workflowId ? `#${cliOptions.workflowId}` : ''}`);
+  }
   await new Promise(() => undefined);
+}
+
+function parseServerArgs(args: string[]): HarnessServerOptions {
+  const out: HarnessServerOptions = {};
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--project') {
+      const value = args[i + 1];
+      if (!value) throw new Error('Missing value for --project');
+      out.projectRoot = value;
+      i += 1;
+    } else if (arg === '--workflow') {
+      const value = args[i + 1];
+      if (!value) throw new Error('Missing value for --workflow');
+      out.workflowId = value;
+      i += 1;
+    } else if (arg === '--runs-dir') {
+      const value = args[i + 1];
+      if (!value) throw new Error('Missing value for --runs-dir');
+      out.runsDir = value;
+      i += 1;
+    }
+  }
+  return out;
 }
