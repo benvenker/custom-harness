@@ -7,6 +7,12 @@ import { createHarnessServerHandler } from '../src/server.js';
 import type { RunSmithersWorkflowOptions, RunSmithersWorkflowResult } from '../src/app/runSmithersWorkflow.js';
 import type { RunOutcomeOptions, RunOutcomeResult } from '../src/app/runOutcome.js';
 import type { PlannerOutput } from '../src/planning/schema.js';
+import type {
+  SmithersRunDetail,
+  SmithersRunEventsResult,
+  SmithersRunReader,
+  SmithersRunSummary,
+} from '../src/smithersProject/runReaderTypes.js';
 
 function tempRunsDir() {
   return mkdtempSync(join(tmpdir(), 'custom-harness-server-runs-'));
@@ -36,6 +42,307 @@ function writeExistingRunWithRawPlan(
   }, null, 2)}\n`);
   writeFileSync(join(runDir, 'plan.json'), `${JSON.stringify({ raw: rawPlan, graph: { nodes: [] } }, null, 2)}\n`);
 }
+
+function smithersRunSummary(overrides: Partial<SmithersRunSummary> = {}): SmithersRunSummary {
+  return {
+    runId: 'smithers-run-true',
+    parentRunId: null,
+    workflowName: 'truth-workflow',
+    workflowPath: '/project/.smithers/workflows/truth-workflow.tsx',
+    workflowHash: 'hash-true',
+    status: 'running',
+    createdAtMs: 1000,
+    startedAtMs: 1001,
+    finishedAtMs: null,
+    heartbeatAtMs: 1002,
+    runtimeOwnerId: 'owner-true',
+    errorJson: null,
+    error: null,
+    configJson: '{"source":"reader"}',
+    config: { source: 'reader' },
+    ...overrides,
+  };
+}
+
+function smithersRunDetail(overrides: Partial<SmithersRunDetail> = {}): SmithersRunDetail {
+  const run = overrides.run ?? smithersRunSummary();
+  return {
+    run,
+    nodes: [{
+      runId: run.runId,
+      nodeId: 'reader-node',
+      iteration: 0,
+      state: 'running',
+      status: 'running',
+      lastAttempt: 1,
+      updatedAtMs: 1010,
+      outputTable: 'reader_outputs',
+      label: 'Reader node',
+    }],
+    attempts: [],
+    events: [{
+      runId: run.runId,
+      seq: 7,
+      timestampMs: 1020,
+      type: 'reader.event',
+      payloadJson: '{"nodeId":"reader-node"}',
+      payload: { nodeId: 'reader-node' },
+      nodeId: 'reader-node',
+      iteration: null,
+      attempt: null,
+    }],
+    frames: [{
+      runId: run.runId,
+      frameNo: 3,
+      createdAtMs: 1030,
+      xmlHash: 'xml-hash-true',
+      encoding: 'json',
+      mountedTaskIdsJson: '["reader-node"]',
+      mountedTaskIds: ['reader-node'],
+      taskIndexJson: '{"reader-node":{"label":"Reader node"}}',
+      taskIndex: { 'reader-node': { label: 'Reader node' } },
+      note: 'from fake reader',
+    }],
+    outputs: [],
+    cursors: { nextEventSeq: 8 },
+    parseWarnings: [],
+    ...overrides,
+  };
+}
+
+function smithersEventsResult(overrides: Partial<SmithersRunEventsResult> = {}): SmithersRunEventsResult {
+  return {
+    events: [{
+      runId: 'smithers-run-true',
+      seq: 11,
+      timestampMs: 1040,
+      type: 'reader.events-endpoint',
+      payloadJson: '{"source":"reader-events"}',
+      payload: { source: 'reader-events' },
+      nodeId: null,
+      iteration: null,
+      attempt: null,
+    }],
+    cursors: { nextEventSeq: 12 },
+    ...overrides,
+  };
+}
+
+function fakeSmithersRunReader(options: {
+  runs?: SmithersRunSummary[];
+  detail?: SmithersRunDetail | null;
+  events?: SmithersRunEventsResult;
+  onListRuns?: (options: unknown) => void;
+  onGetRunDetail?: (runId: string, options: unknown) => void;
+  onListEvents?: (runId: string, options: unknown) => void;
+  onClose?: () => void;
+} = {}): SmithersRunReader {
+  return {
+    async listRuns(listOptions) {
+      options.onListRuns?.(listOptions);
+      return options.runs ?? [smithersRunSummary()];
+    },
+    async getRunDetail(runId, detailOptions) {
+      options.onGetRunDetail?.(runId, detailOptions);
+      return options.detail === undefined ? smithersRunDetail({ run: smithersRunSummary({ runId }) }) : options.detail;
+    },
+    async listEvents(runId, eventsOptions) {
+      options.onListEvents?.(runId, eventsOptions);
+      return options.events ?? smithersEventsResult({ events: smithersEventsResult().events.map((event) => ({ ...event, runId })) });
+    },
+    close() {
+      options.onClose?.();
+    },
+  };
+}
+
+describe('HTTP server DB-backed Smithers run inspection API', () => {
+  it('lists Smithers runs using the injected reader and closes it after the request', async () => {
+    const calls: unknown[] = [];
+    let closeCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({
+        runs: [smithersRunSummary({ runId: 'reader-list-run', workflowName: 'reader-list' })],
+        onListRuns: (options) => calls.push(options),
+        onClose: () => { closeCalls += 1; },
+      }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs?limit=25&status=running&workflowId=reader-list'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      runs: [smithersRunSummary({ runId: 'reader-list-run', workflowName: 'reader-list' })],
+    });
+    expect(calls).toEqual([{ limit: 25, status: 'running', workflowId: 'reader-list' }]);
+    expect(closeCalls).toBe(1);
+  });
+
+  it('clamps list limits before passing them to the reader', async () => {
+    const calls: unknown[] = [];
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({ onListRuns: (options) => calls.push(options) }),
+    });
+
+    const low = await handler(new Request('http://localhost/api/smithers/runs?limit=-50'));
+    const high = await handler(new Request('http://localhost/api/smithers/runs?limit=50000'));
+
+    expect(low.status).toBe(200);
+    expect(high.status).toBe(200);
+    expect(calls).toEqual([{ limit: 1 }, { limit: 500 }]);
+  });
+
+  it('returns Smithers run detail using the injected reader and parsed detail query options', async () => {
+    const detail = smithersRunDetail({
+      run: smithersRunSummary({ runId: 'reader-detail-run', status: 'finished' }),
+      outputs: [{ runId: 'reader-detail-run', nodeId: 'reader-node', iteration: 0, outputTable: 'reader_outputs', row: { source: 'reader-output' } }],
+    });
+    const calls: Array<{ runId: string; options: unknown }> = [];
+    let closeCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({
+        detail,
+        onGetRunDetail: (runId, options) => calls.push({ runId, options }),
+        onClose: () => { closeCalls += 1; },
+      }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs/reader-detail-run?eventsAfterSeq=41&eventLimit=2000&frameLimit=0&includeOutputs=true'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, detail });
+    expect(calls).toEqual([{ runId: 'reader-detail-run', options: { eventsAfterSeq: 41, eventLimit: 1000, frameLimit: 1, includeOutputs: true } }]);
+    expect(closeCalls).toBe(1);
+  });
+
+  it('returns a structured 404 and closes the reader when a Smithers run is missing', async () => {
+    const calls: Array<{ runId: string; options: unknown }> = [];
+    let closeCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({
+        detail: null,
+        onGetRunDetail: (runId, options) => calls.push({ runId, options }),
+        onClose: () => { closeCalls += 1; },
+      }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs/missing-run'));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ ok: false, error: 'Smithers run not found: missing-run', code: 'SMITHERS_RUN_NOT_FOUND' });
+    expect(calls).toEqual([{ runId: 'missing-run', options: {} }]);
+    expect(closeCalls).toBe(1);
+  });
+
+  it('returns Smithers run events using afterSeq, limit, nodeId, types, and timestamp query options', async () => {
+    const events = smithersEventsResult({
+      events: [{
+        runId: 'reader-events-run',
+        seq: 19,
+        timestampMs: 1100,
+        type: 'reader.typeB',
+        payloadJson: '{"source":"events"}',
+        payload: { source: 'events' },
+        nodeId: null,
+        iteration: null,
+        attempt: null,
+      }],
+      cursors: { nextEventSeq: 20 },
+    });
+    const calls: Array<{ runId: string; options: unknown }> = [];
+    let closeCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({
+        events,
+        onListEvents: (runId, options) => calls.push({ runId, options }),
+        onClose: () => { closeCalls += 1; },
+      }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs/reader-events-run/events?afterSeq=10&limit=2000&nodeId=reader-node&types=reader.typeA,reader.typeB,,&sinceTimestampMs=1090'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, ...events });
+    expect(calls).toEqual([{ runId: 'reader-events-run', options: { afterSeq: 10, limit: 1000, nodeId: 'reader-node', types: ['reader.typeA', 'reader.typeB'], sinceTimestampMs: 1090 } }]);
+    expect(closeCalls).toBe(1);
+  });
+
+  it('uses afterSeq as an alias for eventsAfterSeq on detail requests', async () => {
+    const calls: unknown[] = [];
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({ onGetRunDetail: (_runId, options) => calls.push(options) }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs/reader-detail-run?afterSeq=15&includeOutputs=false'));
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ eventsAfterSeq: 15, includeOutputs: false }]);
+  });
+
+  it('ignores contradictory legacy runs artifacts for all Smithers run inspection endpoints', async () => {
+    const runsDir = tempRunsDir();
+    mkdirSync(join(runsDir, 'legacy-false-run'), { recursive: true });
+    writeFileSync(join(runsDir, 'index.json'), `${JSON.stringify({ runs: [{ id: 'legacy-false-run', status: 'failed', workflowName: 'legacy-lie' }] })}\n`);
+    writeFileSync(join(runsDir, 'legacy-false-run', 'plan.json'), `${JSON.stringify({ raw: { source: 'legacy-plan-lie' }, graph: { nodes: [{ id: 'legacy-node' }] } })}\n`);
+    writeFileSync(join(runsDir, 'legacy-false-run', 'run.json'), `${JSON.stringify({ id: 'legacy-false-run', status: 'failed', goal: 'legacy lie' })}\n`);
+    writeFileSync(join(runsDir, 'legacy-false-run', 'events.jsonl'), `${JSON.stringify({ type: 'legacy.lie', payload: { source: 'legacy-events' } })}\n`);
+
+    const readerList = smithersRunSummary({ runId: 'reader-true-run', status: 'finished', workflowName: 'reader-truth' });
+    const readerDetail = smithersRunDetail({ run: readerList });
+    const readerEvents = smithersEventsResult({ events: [{ ...smithersEventsResult().events[0]!, runId: 'reader-true-run', type: 'reader.truth' }] });
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      runsDir,
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({ runs: [readerList], detail: readerDetail, events: readerEvents }),
+    });
+
+    expect(await (await handler(new Request('http://localhost/api/smithers/runs'))).json()).toEqual({ ok: true, runs: [readerList] });
+    expect(await (await handler(new Request('http://localhost/api/smithers/runs/reader-true-run'))).json()).toEqual({ ok: true, detail: readerDetail });
+    expect(await (await handler(new Request('http://localhost/api/smithers/runs/reader-true-run/events'))).json()).toEqual({ ok: true, ...readerEvents });
+  });
+
+  it('closes the reader when a reader operation throws', async () => {
+    let closeCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => ({
+        async listRuns() {
+          throw new Error('reader exploded');
+        },
+        async getRunDetail() {
+          throw new Error('should not call detail');
+        },
+        async listEvents() {
+          throw new Error('should not call events');
+        },
+        close() {
+          closeCalls += 1;
+        },
+      }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs'));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, error: 'reader exploded' });
+    expect(closeCalls).toBe(1);
+  });
+});
 
 describe('HTTP server rerun API', () => {
   it('reruns exported Smithers graph plans through the Smithers execution path', async () => {

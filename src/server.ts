@@ -11,6 +11,8 @@ import { loadSmithersRuntime, loadWorkflow } from './app/smithersRuntime.js';
 import { depsFromEnv } from './cli.js';
 import { planSchema, type PlannerOutput } from './planning/schema.js';
 import { smithersSnapshotToRenderGraph } from './runs/smithersGraph.js';
+import { createSmithersRunReader as defaultCreateSmithersRunReader } from './smithersProject/runReader.js';
+import type { GetRunDetailOptions, ListEventsOptions, ListRunsOptions, SmithersRunReader } from './smithersProject/runReaderTypes.js';
 
 type RunOutcomeFn = (options: RunOutcomeOptions) => Promise<RunOutcomeResult>;
 type RunSmithersWorkflowFn = (options: RunSmithersWorkflowOptions) => Promise<RunSmithersWorkflowResult>;
@@ -29,6 +31,8 @@ type RunProjectWorkflowFn = (options: {
   promptOverrides?: Record<string, string>;
 }) => Promise<{ runId: string; status: string }>;
 
+type CreateSmithersRunReaderFn = (options: { projectRoot: string }) => SmithersRunReader | Promise<SmithersRunReader>;
+
 export type HarnessServerOptions = {
   rootDir?: string;
   runsDir?: string;
@@ -38,6 +42,7 @@ export type HarnessServerOptions = {
   runSmithersWorkflow?: RunSmithersWorkflowFn;
   renderProjectWorkflowGraph?: RenderProjectWorkflowGraphFn;
   runProjectWorkflow?: RunProjectWorkflowFn;
+  createSmithersRunReader?: CreateSmithersRunReaderFn;
 };
 
 type RunJson = {
@@ -70,6 +75,7 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
   const runSmithersWorkflowFn = options.runSmithersWorkflow ?? runSmithersWorkflow;
   const renderProjectWorkflowGraphFn = options.renderProjectWorkflowGraph ?? renderProjectWorkflowGraph;
   const runProjectWorkflowFn = options.runProjectWorkflow ?? runProjectWorkflow;
+  const createSmithersRunReaderFn = options.createSmithersRunReader ?? defaultCreateSmithersRunReader;
 
   return async function handle(request: Request): Promise<Response> {
     try {
@@ -128,6 +134,37 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
 
       if (url.pathname === '/api/workflows') {
         return json(workflowsResponse({ projectRoot, defaultWorkflowId }));
+      }
+
+      if (url.pathname === '/api/smithers/runs') {
+        return await smithersRunsListResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          createSmithersRunReader: createSmithersRunReaderFn,
+        });
+      }
+
+      const smithersRunEventsMatch = url.pathname.match(/^\/api\/smithers\/runs\/([^/]+)\/events$/);
+      if (smithersRunEventsMatch) {
+        return await smithersRunEventsResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          runId: decodeURIComponent(smithersRunEventsMatch[1]),
+          createSmithersRunReader: createSmithersRunReaderFn,
+        });
+      }
+
+      const smithersRunDetailMatch = url.pathname.match(/^\/api\/smithers\/runs\/([^/]+)$/);
+      if (smithersRunDetailMatch) {
+        return await smithersRunDetailResponse({
+          request,
+          projectRoot,
+          defaultWorkflowId,
+          runId: decodeURIComponent(smithersRunDetailMatch[1]),
+          createSmithersRunReader: createSmithersRunReaderFn,
+        });
       }
 
       const graphMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/graph$/);
@@ -370,6 +407,89 @@ function workflowsResponse(args: { projectRoot?: string; defaultWorkflowId?: str
     defaultWorkflowId: args.defaultWorkflowId,
     workflows: discoverProjectWorkflows(setup.projectRoot),
   };
+}
+
+async function smithersRunsListResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  createSmithersRunReader: CreateSmithersRunReaderFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  return await withSmithersRunReader(setup.projectRoot, args.createSmithersRunReader, async (reader) => {
+    const url = new URL(args.request.url);
+    const options: ListRunsOptions = compactOptions({
+      limit: parseIntegerParam(url.searchParams, 'limit', { min: 1, max: 500 }),
+      status: stringParam(url.searchParams, 'status'),
+      workflowId: stringParam(url.searchParams, 'workflowId'),
+    });
+    const runs = await reader.listRuns(options);
+    return json({ ok: true, runs });
+  });
+}
+
+async function smithersRunDetailResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  runId: string;
+  createSmithersRunReader: CreateSmithersRunReaderFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  return await withSmithersRunReader(setup.projectRoot, args.createSmithersRunReader, async (reader) => {
+    const url = new URL(args.request.url);
+    const eventsAfterSeq = parseIntegerParam(url.searchParams, 'eventsAfterSeq', { min: 0, max: Number.MAX_SAFE_INTEGER })
+      ?? parseIntegerParam(url.searchParams, 'afterSeq', { min: 0, max: Number.MAX_SAFE_INTEGER });
+    const options: GetRunDetailOptions = compactOptions({
+      eventsAfterSeq,
+      eventLimit: parseIntegerParam(url.searchParams, 'eventLimit', { min: 1, max: 1000 }),
+      frameLimit: parseIntegerParam(url.searchParams, 'frameLimit', { min: 1, max: 100 }),
+      includeOutputs: booleanParam(url.searchParams, 'includeOutputs'),
+    });
+    const detail = await reader.getRunDetail(args.runId, options);
+    if (!detail) {
+      return json({ ok: false, error: `Smithers run not found: ${args.runId}`, code: 'SMITHERS_RUN_NOT_FOUND' }, 404);
+    }
+    return json({ ok: true, detail });
+  });
+}
+
+async function smithersRunEventsResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  runId: string;
+  createSmithersRunReader: CreateSmithersRunReaderFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  return await withSmithersRunReader(setup.projectRoot, args.createSmithersRunReader, async (reader) => {
+    const url = new URL(args.request.url);
+    const options: ListEventsOptions = compactOptions({
+      afterSeq: parseIntegerParam(url.searchParams, 'afterSeq', { min: 0, max: Number.MAX_SAFE_INTEGER }),
+      limit: parseIntegerParam(url.searchParams, 'limit', { min: 1, max: 1000 }),
+      nodeId: stringParam(url.searchParams, 'nodeId'),
+      types: csvParam(url.searchParams, 'types'),
+      sinceTimestampMs: parseIntegerParam(url.searchParams, 'sinceTimestampMs', { min: 0, max: Number.MAX_SAFE_INTEGER }),
+    });
+    const result = await reader.listEvents(args.runId, options);
+    return json({ ok: true, ...result });
+  });
+}
+
+async function withSmithersRunReader(
+  projectRoot: string,
+  createSmithersRunReader: CreateSmithersRunReaderFn,
+  callback: (reader: SmithersRunReader) => Promise<Response>,
+) {
+  const reader = await createSmithersRunReader({ projectRoot });
+  try {
+    return await callback(reader);
+  } finally {
+    reader.close();
+  }
 }
 
 function projectSetup(args: { projectRoot?: string; defaultWorkflowId?: string }) {
@@ -633,6 +753,44 @@ function parseJsonOutputs(text: string): Record<string, unknown[]> {
     out[table] = rows;
   }
   return out;
+}
+
+function parseIntegerParam(
+  params: URLSearchParams,
+  name: string,
+  bounds: { min: number; max: number },
+) {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new RequestValidationError(`${name} must be a number`);
+  return Math.min(bounds.max, Math.max(bounds.min, Math.floor(value)));
+}
+
+function booleanParam(params: URLSearchParams, name: string) {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === '') return undefined;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new RequestValidationError(`${name} must be true or false`);
+}
+
+function stringParam(params: URLSearchParams, name: string) {
+  const raw = params.get(name);
+  if (raw === null) return undefined;
+  const value = raw.trim();
+  return value ? value : undefined;
+}
+
+function csvParam(params: URLSearchParams, name: string) {
+  const raw = params.get(name);
+  if (raw === null) return undefined;
+  const values = raw.split(',').map((value) => value.trim()).filter(Boolean);
+  return values.length > 0 ? values : undefined;
+}
+
+function compactOptions<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, option]) => option !== undefined)) as T;
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
