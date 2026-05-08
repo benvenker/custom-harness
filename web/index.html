@@ -1324,6 +1324,7 @@
   const promptBaselines = new Map();
   let studioInspectorHelperPromise = null;
   let workflowRunUiHelperPromise = null;
+  let smithersRunOverlayHelperPromise = null;
   let runRefreshTimer = null;
   let projectRunInspection = null;
   let projectRunInspectionSeq = 0;
@@ -1593,6 +1594,13 @@
     return workflowRunUiHelperPromise;
   }
 
+  function loadSmithersRunOverlayHelper() {
+    if (!smithersRunOverlayHelperPromise) {
+      smithersRunOverlayHelperPromise = import("/src/ui/smithersRunOverlay.js");
+    }
+    return smithersRunOverlayHelperPromise;
+  }
+
   function workflowPathForCurrentProject() {
     if (!currentWorkflowId) return null;
     const workflows = currentProject?.workflows;
@@ -1695,6 +1703,96 @@
   function renderProjectReadOnlyNote(state) {
     if (state.structuredFields?.length > 0) return "";
     return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
+  }
+
+  function liveSmithersDetail() {
+    return currentRunMeta?.liveSmithers === true && currentRunMeta?.smithersRunDetail
+      ? currentRunMeta.smithersRunDetail
+      : null;
+  }
+
+  function latestSmithersNodeForGraphNode(node, detail) {
+    if (!node || !detail || !Array.isArray(detail.nodes)) return null;
+    const smithersNodeId = node.smithers?.nodeId || node.id;
+    return detail.nodes
+      .filter(row => row.nodeId === smithersNodeId || row.nodeId === node.id)
+      .sort((a, b) => (b.iteration ?? 0) - (a.iteration ?? 0) || (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0))[0] || null;
+  }
+
+  function selectedLiveSmithersNodeId(node, detail) {
+    return latestSmithersNodeForGraphNode(node, detail)?.nodeId || node?.smithers?.nodeId || node?.id;
+  }
+
+  function selectedLiveSmithersIteration(node, detail) {
+    const latest = latestSmithersNodeForGraphNode(node, detail);
+    return typeof latest?.iteration === "number" ? latest.iteration : null;
+  }
+
+  function filterLiveRowsForNode(rows, nodeId, iteration) {
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(row => row.nodeId === nodeId && (iteration == null || row.iteration === iteration));
+  }
+
+  function stringifyLiveValue(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+
+  function renderLiveSmithersInspectorSections(node, isHarness) {
+    const detail = liveSmithersDetail();
+    if (!detail) return "";
+    const dbNode = latestSmithersNodeForGraphNode(node, detail);
+    const nodeId = selectedLiveSmithersNodeId(node, detail);
+    const iteration = selectedLiveSmithersIteration(node, detail);
+    const attempts = filterLiveRowsForNode(detail.attempts, nodeId, iteration);
+    const outputs = filterLiveRowsForNode(detail.outputs, nodeId, iteration);
+    const events = Array.isArray(detail.events) ? detail.events.filter(event => event.nodeId === nodeId || event.nodeId == null) : [];
+    const frames = Array.isArray(detail.frames) ? detail.frames : [];
+    const outputHtml = outputs.length === 0
+      ? `<div class="node-edit-note">No Smithers output rows recorded for this node yet.</div>`
+      : outputs.map(output => `<pre class="output-box">${escapeHtml(stringifyLiveValue(output.row))}</pre>`).join("");
+    const attemptRows = attempts.length === 0
+      ? `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no attempts recorded for this node yet</span></div>`
+      : attempts.map((attempt, index) => `<div class="tl-row ${isHarness ? "harness" : ""}">
+          <span class="step">${String(index + 1).padStart(2, "0")}</span>
+          <span class="ts">${escapeHtml(String(attempt.attempt ?? "—"))}</span>
+          <span class="what"><b>${escapeHtml(attempt.status || attempt.state || "unknown")}</b>${attempt.error ? ` · ${escapeHtml(stringifyLiveValue(attempt.error))}` : ""}</span>
+        </div>`).join("");
+    const timelineRows = events.length === 0
+      ? `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no DB events in the current polling window</span></div>`
+      : events.map((event, index) => `<div class="tl-row ${isHarness ? "harness" : ""}">
+          <span class="step">${String(index + 1).padStart(2, "0")}</span>
+          <span class="ts">#${escapeHtml(String(event.seq ?? index + 1))}</span>
+          <span class="what">${escapeHtml(event.type || "event")}</span>
+        </div>`).join("");
+    const frameRows = frames.length === 0
+      ? `<div class="node-edit-note">No Smithers frame metadata recorded yet.</div>`
+      : `<div class="val mono">${frames.map(frame => `frame ${frame.frameNo} · mounted ${(frame.mountedTaskIds || []).join(", ") || "—"}${frame.note ? ` · ${frame.note}` : ""}`).map(escapeHtml).join("<br>")}</div>`;
+
+    return `
+      <div class="explain-box"><b>Smithers SQLite · live run</b><br>Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph layout remains the preview projection.</div>
+      <div class="field">
+        <div class="lbl"><span>Smithers run state</span><span class="output-meta">raw status</span></div>
+        <div class="val mono">run ${escapeHtml(detail.run?.runId || currentRunId || "unknown")} · ${escapeHtml(detail.run?.status || "unknown")}<br>node ${escapeHtml(nodeId || node.id)} · ${escapeHtml(dbNode?.status || "not recorded")} · iteration ${escapeHtml(iteration ?? "—")}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Attempts</span><span class="output-meta">DB-backed</span></div>
+        <div class="timeline">${attemptRows}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Run output</span><span class="output-meta">Smithers output rows</span></div>
+        ${outputHtml}
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Activity timeline</span><span class="output-meta">DB events · ${(events || []).length} shown</span></div>
+        <div class="timeline">${timelineRows}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Frame summary</span><span class="output-meta">metadata only</span></div>
+        ${frameRows}
+      </div>
+    `;
   }
 
   function pretendOutputPlaceholder(node) {
@@ -1865,15 +1963,23 @@
             <div class="val prompt ${isHarness ? "harness" : ""}">${escapeHtml(node.prompt)}</div>
           </div>`;
 
+    const liveDetail = liveSmithersDetail();
     const outputDraft = currentWorkflowId && node.type === "task" ? projectNodeOutputs.get(node.id) : undefined;
     const outputEditor = currentWorkflowId && node.type === "task"
-      ? `<div class="field">
-          <div class="lbl">Pretend this node output is</div>
-          <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="7" spellcheck="false" placeholder="${escapeHtml(pretendOutputPlaceholder(node))}">${escapeHtml(outputDraft ? JSON.stringify(outputDraft, null, 2) : "")}</textarea>
-          <div class="node-edit-note">Paste pretend JSON output for this task to preview downstream prompts. This does not run the task and does not write Smithers run state.</div>
-          <button class="btn studio-run" id="applyNodeOutputBtn">Apply pretend output to downstream preview <span class="arrow">→</span></button>
-          ${outputDraft ? `<button class="prompt-reset" id="clearNodeOutputBtn">Clear pretend output</button>` : ""}
-        </div>`
+      ? liveDetail
+        ? `<div class="field">
+            <div class="lbl">Pretend this node output is</div>
+            <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="5" spellcheck="false" disabled placeholder="${escapeHtml(pretendOutputPlaceholder(node))}"></textarea>
+            <div class="node-edit-note">Preview graph output is not live Smithers run state.</div>
+            <button class="btn studio-run" id="applyNodeOutputBtn" disabled>Preview-only while inspecting live run <span class="arrow">→</span></button>
+          </div>`
+        : `<div class="field">
+            <div class="lbl">Pretend this node output is</div>
+            <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="7" spellcheck="false" placeholder="${escapeHtml(pretendOutputPlaceholder(node))}">${escapeHtml(outputDraft ? JSON.stringify(outputDraft, null, 2) : "")}</textarea>
+            <div class="node-edit-note">Paste pretend JSON output for this task to preview downstream prompts. This does not run the task and does not write Smithers run state.</div>
+            <button class="btn studio-run" id="applyNodeOutputBtn">Apply pretend output to downstream preview <span class="arrow">→</span></button>
+            ${outputDraft ? `<button class="prompt-reset" id="clearNodeOutputBtn">Clear pretend output</button>` : ""}
+          </div>`
       : "";
     const sourceExplanation = currentWorkflowId
       ? `<div class="explain-box">
@@ -1882,6 +1988,16 @@
           <button class="source-link-btn" id="sourceLinkBtn">Edit source for workflow ${escapeHtml(currentWorkflowId)}</button>
         </div>`
       : "";
+    const liveSmithersSections = node.type === "task" ? renderLiveSmithersInspectorSections(node, isHarness) : "";
+    const legacyOutputHtml = liveDetail ? "" : outputFieldHtml(node);
+    const legacyTimelineSection = liveDetail && node.type === "task" ? "" : `
+        <div class="field">
+          <div class="lbl">
+            <span>Activity timeline</span>
+            <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:10px">${(node.timeline || []).length} events</span>
+          </div>
+          <div class="timeline">${tlRows}</div>
+        </div>`;
 
     inspector.innerHTML = `
       <div class="insp-head">
@@ -1897,20 +2013,15 @@
         ${studioBarHtml}
         ${promptFieldHtml}
         ${outputEditor}
+        ${liveSmithersSections}
         ${node.tools && node.tools.length ? `
           <div class="field">
             <div class="lbl">Tools available</div>
             <div class="val mono">${node.tools.join(", ")}</div>
           </div>
         ` : ""}
-        ${outputFieldHtml(node)}
-        <div class="field">
-          <div class="lbl">
-            <span>Activity timeline</span>
-            <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:10px">${(node.timeline || []).length} events</span>
-          </div>
-          <div class="timeline">${tlRows}</div>
-        </div>
+        ${legacyOutputHtml}
+        ${legacyTimelineSection}
       </div>
     `;
 
@@ -1975,7 +2086,7 @@
       runBtn?.addEventListener("click", runWithEdits);
     }
 
-    hydrateNodeOutput(node, selectedAtRender);
+    if (!liveDetail) hydrateNodeOutput(node, selectedAtRender);
     // Polling can re-render the inspector while the user is mid-scroll/edit;
     // preserve scroll positions and (if focused) the textarea cursor.
     restoreInspectorScrollState(prevScroll);
@@ -2408,6 +2519,12 @@
       const data = await response.json();
       if (data.ok === false) throw new Error(data.error || data.code || "inspection failed");
       const detail = data.detail || data;
+      const previousDetail = currentRunMeta?.smithersRunDetail;
+      if (previousDetail && Array.isArray(previousDetail.events) && Array.isArray(detail.events)) {
+        const eventsBySeq = new Map(previousDetail.events.map(event => [event.seq, event]));
+        detail.events.forEach(event => eventsBySeq.set(event.seq, event));
+        detail.events = [...eventsBySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+      }
       const status = detail?.run?.status || data.status || state.status || "unknown";
       state.status = status;
       state.notFoundRetries = 0;
@@ -2424,7 +2541,13 @@
       if (currentWorkflowGraph && currentRunId === state.runId) {
         currentWorkflowGraph.runId = state.runId;
         currentWorkflowGraph.runStatus = status;
-        SAMPLES._project = currentWorkflowGraph;
+        try {
+          const { buildSmithersRunOverlayState } = await loadSmithersRunOverlayHelper();
+          SAMPLES._project = buildSmithersRunOverlayState({ graph: currentWorkflowGraph, detail }).graph;
+        } catch (overlayErr) {
+          console.warn("smithers live overlay unavailable", overlayErr);
+          SAMPLES._project = currentWorkflowGraph;
+        }
         loadSample("_project");
       }
       runIdEl.textContent = state.runId;

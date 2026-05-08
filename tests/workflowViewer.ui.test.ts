@@ -64,6 +64,116 @@ type WorkflowRunUiHelper = {
   }): Promise<ProjectRunInspectionResult>;
 };
 
+type OverlayRenderNode = InspectorNode & {
+  status: string;
+  smithers?: {
+    nodeId?: string;
+    meta?: unknown;
+  };
+  timeline: unknown[];
+};
+
+type OverlayRenderGraph = {
+  goal: string;
+  path: 'workflow';
+  reason: string;
+  latency: string;
+  tokens: string;
+  runId: string;
+  title: string;
+  nodes: OverlayRenderNode[];
+  edges: Array<{ from: string; to: string; label?: string }>;
+  defaultSelected: string;
+};
+
+type SmithersRunDetailFixture = {
+  run: { runId: string; status: string; workflowName?: string; workflowPath?: string | null };
+  nodes: Array<{
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    state: string;
+    status: string;
+    outputTable: string;
+    label: string | null;
+  }>;
+  attempts: Array<{
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    state: string;
+    status: string;
+    error: unknown;
+    responseText?: string | null;
+    startedAtMs: number;
+    finishedAtMs?: number | null;
+  }>;
+  events: Array<{
+    runId: string;
+    seq: number;
+    timestampMs: number;
+    type: string;
+    payload: unknown;
+    nodeId: string | null;
+    iteration: number | null;
+    attempt: number | null;
+  }>;
+  frames: Array<{
+    runId: string;
+    frameNo: number;
+    createdAtMs: number;
+    mountedTaskIds: string[];
+    taskIndex: unknown;
+    note: string | null;
+  }>;
+  outputs: Array<{
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    outputTable: string;
+    row: Record<string, unknown>;
+  }>;
+  cursors: { nextEventSeq: number | null };
+  parseWarnings: unknown[];
+};
+
+type SmithersRunOverlayHelper = {
+  buildSmithersRunOverlayState(options: {
+    graph: OverlayRenderGraph;
+    detail: SmithersRunDetailFixture;
+  }): {
+    graph: OverlayRenderGraph;
+    provenanceLabel: string;
+    nodeOverlays: Array<{
+      graphNodeId: string;
+      nodeId: string;
+      selectedIteration: number;
+      rawStatus: string;
+      rawState: string;
+      visualStatus: string;
+      source: 'smithers-db';
+    }>;
+    visibleCopy: string[];
+  };
+  buildSmithersRunInspectorState(options: {
+    graph: OverlayRenderGraph;
+    detail: SmithersRunDetailFixture;
+    selectedGraphNodeId: string;
+    liveMode: true;
+  }): {
+    provenanceLabel: string;
+    run: { runId: string; rawStatus: string };
+    selectedNode: { graphNodeId: string; nodeId: string; selectedIteration: number; rawStatus: string; rawState: string } | null;
+    attempts: Array<{ nodeId: string; iteration: number; attempt: number; rawStatus: string; errorText: string | null }>;
+    outputs: { empty: boolean; emptyMessage: string | null; rows: Array<{ nodeId: string; iteration: number; row: Record<string, unknown> }> };
+    timeline: Array<{ seq: number; type: string; nodeId: string | null; source: 'smithers-db' }>;
+    frames: Array<{ frameNo: number; mountedTaskIds: string[]; kind: 'summary' }>;
+    pretendOutputControls: { enabled: boolean; mode: 'preview-only' | 'live'; help: string };
+    visibleCopy: string[];
+  };
+};
+
 async function loadInspectorHelper(): Promise<{
   buildStudioInspectorState: BuildStudioInspectorState;
 }> {
@@ -74,6 +184,10 @@ async function loadInspectorHelper(): Promise<{
 
 async function loadWorkflowRunUiHelper(): Promise<WorkflowRunUiHelper> {
   return import('../src/ui/workflowRunUi.js') as Promise<WorkflowRunUiHelper>;
+}
+
+async function loadSmithersRunOverlayHelper(): Promise<SmithersRunOverlayHelper> {
+  return import('../src/ui/smithersRunOverlay.js') as Promise<SmithersRunOverlayHelper>;
 }
 
 function projectInspectorState(
@@ -124,6 +238,89 @@ const promptFieldMeta = {
     },
   },
 };
+
+function previewGraphForOverlay(nodes: OverlayRenderNode[]): OverlayRenderGraph {
+  return {
+    goal: 'Inspect Smithers run',
+    path: 'workflow',
+    reason: 'preview graph should remain only the visual projection',
+    latency: 'n/a',
+    tokens: 'n/a',
+    runId: 'preview-run',
+    title: 'Overlay Fixture',
+    nodes,
+    edges: [],
+    defaultSelected: nodes[0]?.id ?? 'missing',
+  };
+}
+
+function previewTaskNode(overrides: Partial<OverlayRenderNode> = {}): OverlayRenderNode {
+  return {
+    id: 'ui-task',
+    type: 'task',
+    title: 'Preview Task',
+    prompt: 'Rendered preview prompt',
+    status: 'running',
+    timeline: [],
+    smithers: { nodeId: 'smithers-task' },
+    ...overrides,
+  };
+}
+
+function smithersRunDetailFixture(overrides: Partial<SmithersRunDetailFixture> = {}): SmithersRunDetailFixture {
+  return {
+    run: { runId: 'live-run', status: 'finished', workflowName: 'foo', workflowPath: '.smithers/workflows/foo.tsx' },
+    nodes: [{
+      runId: 'live-run',
+      nodeId: 'smithers-task',
+      iteration: 0,
+      state: 'finished',
+      status: 'finished',
+      outputTable: 'task_output',
+      label: 'Smithers Task',
+    }],
+    attempts: [{
+      runId: 'live-run',
+      nodeId: 'smithers-task',
+      iteration: 0,
+      attempt: 1,
+      state: 'failed',
+      status: 'failed',
+      error: { message: 'Model timeout' },
+      responseText: null,
+      startedAtMs: 10,
+      finishedAtMs: 20,
+    }],
+    events: [{
+      runId: 'live-run',
+      seq: 5,
+      timestampMs: 30,
+      type: 'node.finished',
+      payload: { nodeId: 'smithers-task', iteration: 0 },
+      nodeId: 'smithers-task',
+      iteration: 0,
+      attempt: 1,
+    }],
+    frames: [{
+      runId: 'live-run',
+      frameNo: 2,
+      createdAtMs: 40,
+      mountedTaskIds: ['smithers-task'],
+      taskIndex: { 'smithers-task': { label: 'Smithers Task' } },
+      note: 'latest frame metadata only',
+    }],
+    outputs: [{
+      runId: 'live-run',
+      nodeId: 'smithers-task',
+      iteration: 0,
+      outputTable: 'task_output',
+      row: { summary: 'done' },
+    }],
+    cursors: { nextEventSeq: 6 },
+    parseWarnings: [],
+    ...overrides,
+  };
+}
 
 describe('workflow viewer studio inspector state', () => {
   it('keeps project workflow tasks without studio metadata read-only while exposing rendered prompt preview and source fallback', async () => {
@@ -332,3 +529,158 @@ describe('project workflow live run inspection helpers', () => {
     expect(branchMatch?.groups?.body ?? '').not.toContain('waitForRunToRender(');
   });
 });
+
+describe('project workflow Smithers run overlay helpers', () => {
+  it('maps DB node status finished to visual done without trusting preview node status', async () => {
+    const { buildSmithersRunOverlayState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([
+      previewTaskNode({ id: 'ui-task', status: 'running', smithers: { nodeId: 'smithers-task' } }),
+    ]);
+    const detail = smithersRunDetailFixture({
+      nodes: [{
+        runId: 'live-run',
+        nodeId: 'smithers-task',
+        iteration: 0,
+        state: 'finished',
+        status: 'finished',
+        outputTable: 'task_output',
+        label: 'Smithers Task',
+      }],
+    });
+
+    const state = buildSmithersRunOverlayState({ graph, detail });
+    const overlay = state.nodeOverlays.find((node) => node.graphNodeId === 'ui-task');
+
+    expect(overlay).toEqual(expect.objectContaining({
+      graphNodeId: 'ui-task',
+      nodeId: 'smithers-task',
+      selectedIteration: 0,
+      rawStatus: 'finished',
+      rawState: 'finished',
+      visualStatus: 'done',
+      source: 'smithers-db',
+    }));
+    expect(state.graph.nodes.find((node) => node.id === 'ui-task')?.status).toBe('done');
+    expect(state.visibleCopy).toContain('Smithers SQLite · live run');
+    expect(state.visibleCopy).toContain('raw status: finished');
+  });
+
+  it('matches graph node ids or smithers.nodeId and chooses the latest DB iteration by default', async () => {
+    const { buildSmithersRunOverlayState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([
+      previewTaskNode({ id: 'plain-matching-id', status: 'pending', smithers: undefined }),
+      previewTaskNode({ id: 'ui-wrapper', status: 'pending', smithers: { nodeId: 'real-node-id' } }),
+    ]);
+    const detail = smithersRunDetailFixture({
+      nodes: [
+        { runId: 'live-run', nodeId: 'plain-matching-id', iteration: 0, state: 'running', status: 'running', outputTable: 'plain_out', label: null },
+        { runId: 'live-run', nodeId: 'real-node-id', iteration: 0, state: 'running', status: 'running', outputTable: 'real_out', label: null },
+        { runId: 'live-run', nodeId: 'real-node-id', iteration: 2, state: 'failed', status: 'failed', outputTable: 'real_out', label: null },
+        { runId: 'live-run', nodeId: 'real-node-id', iteration: 1, state: 'finished', status: 'finished', outputTable: 'real_out', label: null },
+      ],
+    });
+
+    const state = buildSmithersRunOverlayState({ graph, detail });
+
+    expect(state.nodeOverlays).toEqual(expect.arrayContaining([
+      expect.objectContaining({ graphNodeId: 'plain-matching-id', nodeId: 'plain-matching-id', selectedIteration: 0, rawStatus: 'running', visualStatus: 'running' }),
+      expect.objectContaining({ graphNodeId: 'ui-wrapper', nodeId: 'real-node-id', selectedIteration: 2, rawStatus: 'failed', visualStatus: 'failed' }),
+    ]));
+    expect(state.graph.nodes.find((node) => node.id === 'ui-wrapper')?.status).toBe('failed');
+  });
+
+  it('builds inspector state from Smithers DB run state, attempts, output rows, event timeline, and frame summaries', async () => {
+    const { buildSmithersRunInspectorState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([
+      previewTaskNode({ id: 'ui-task', status: 'running', outputPreview: 'pretend preview output', smithers: { nodeId: 'smithers-task' } } as Partial<OverlayRenderNode>),
+    ]);
+    const detail = smithersRunDetailFixture();
+
+    const state = buildSmithersRunInspectorState({ graph, detail, selectedGraphNodeId: 'ui-task', liveMode: true });
+
+    expect(state.provenanceLabel).toBe('Smithers SQLite · live run');
+    expect(state.run).toEqual(expect.objectContaining({ runId: 'live-run', rawStatus: 'finished' }));
+    expect(state.selectedNode).toEqual(expect.objectContaining({
+      graphNodeId: 'ui-task',
+      nodeId: 'smithers-task',
+      selectedIteration: 0,
+      rawStatus: 'finished',
+      rawState: 'finished',
+    }));
+    expect(state.attempts).toEqual([expect.objectContaining({
+      nodeId: 'smithers-task',
+      iteration: 0,
+      attempt: 1,
+      rawStatus: 'failed',
+      errorText: expect.stringContaining('Model timeout'),
+    })]);
+    expect(state.outputs).toEqual({
+      empty: false,
+      emptyMessage: null,
+      rows: [expect.objectContaining({ nodeId: 'smithers-task', iteration: 0, row: { summary: 'done' } })],
+    });
+    expect(state.timeline).toEqual([expect.objectContaining({ seq: 5, type: 'node.finished', nodeId: 'smithers-task', source: 'smithers-db' })]);
+    expect(state.frames).toEqual([expect.objectContaining({ frameNo: 2, mountedTaskIds: ['smithers-task'], kind: 'summary' })]);
+    expect(state.frames[0]).not.toHaveProperty('renderGraph');
+    expect(state.frames[0]).not.toHaveProperty('nodes');
+    expect(state.visibleCopy).toContain('Smithers SQLite · live run');
+    expect(state.visibleCopy).toContain('raw run status: finished');
+    expect(state.visibleCopy).toContain('raw node status: finished');
+    expect(state.visibleCopy).toContain('node.finished');
+    expect(state.visibleCopy).toContain('Run output');
+  });
+
+  it('shows a clear empty output state for live run nodes without output rows', async () => {
+    const { buildSmithersRunInspectorState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([previewTaskNode({ id: 'ui-task', smithers: { nodeId: 'smithers-task' } })]);
+    const detail = smithersRunDetailFixture({ outputs: [] });
+
+    const state = buildSmithersRunInspectorState({ graph, detail, selectedGraphNodeId: 'ui-task', liveMode: true });
+
+    expect(state.outputs).toEqual({
+      empty: true,
+      emptyMessage: 'No Smithers output rows recorded for this node yet.',
+      rows: [],
+    });
+    expect(state.visibleCopy).toContain('No Smithers output rows recorded for this node yet.');
+  });
+
+  it('marks pretend output controls preview-only during live inspection', async () => {
+    const { buildSmithersRunInspectorState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([
+      previewTaskNode({ id: 'ui-task', outputPreview: 'pretend output from preview graph', smithers: { nodeId: 'smithers-task' } } as Partial<OverlayRenderNode>),
+    ]);
+
+    const state = buildSmithersRunInspectorState({
+      graph,
+      detail: smithersRunDetailFixture({ outputs: [] }),
+      selectedGraphNodeId: 'ui-task',
+      liveMode: true,
+    });
+
+    expect(state.pretendOutputControls).toEqual({
+      enabled: false,
+      mode: 'preview-only',
+      help: 'Preview graph output is not live Smithers run state.',
+    });
+    expect(state.visibleCopy).toContain('Preview graph output is not live Smithers run state.');
+    expect(allVisibleText(state)).not.toContain('pretend output from preview graph');
+  });
+
+  it('uses DB events as the live timeline source and does not expose legacy events.jsonl provenance', async () => {
+    const { buildSmithersRunInspectorState } = await loadSmithersRunOverlayHelper();
+    const graph = previewGraphForOverlay([previewTaskNode({ id: 'ui-task', smithers: { nodeId: 'smithers-task' } })]);
+    const detail = smithersRunDetailFixture({
+      events: [
+        { runId: 'live-run', seq: 7, timestampMs: 50, type: 'attempt.started', payload: { source: 'sqlite' }, nodeId: 'smithers-task', iteration: 0, attempt: 1 },
+      ],
+    });
+
+    const state = buildSmithersRunInspectorState({ graph, detail, selectedGraphNodeId: 'ui-task', liveMode: true });
+
+    expect(state.timeline).toEqual([expect.objectContaining({ seq: 7, type: 'attempt.started', source: 'smithers-db' })]);
+    expect(allVisibleText(state)).toContain('attempt.started');
+    expect(allVisibleText(state)).not.toContain('events.jsonl');
+  });
+});
+
