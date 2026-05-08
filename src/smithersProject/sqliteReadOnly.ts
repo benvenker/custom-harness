@@ -1,11 +1,13 @@
 import { Database } from 'bun:sqlite';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
+import { dirname, parse, resolve } from 'node:path';
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 
 export type SqliteReadOnlyOpenOptions = {
   projectRoot: string;
+  dbPath?: string;
+  dbSearchStart?: string;
 };
 
 export type SqliteValue = string | number | bigint | boolean | Uint8Array | null;
@@ -38,11 +40,56 @@ export function resolveSmithersDbPath(projectRoot: string) {
   return resolve(projectRoot, 'smithers.db');
 }
 
-export function openSmithersDbReadOnly(options: SqliteReadOnlyOpenOptions): SmithersDbReadOnlyHandle {
-  const dbPath = resolveSmithersDbPath(options.projectRoot);
-  if (!existsSync(dbPath)) {
-    throw new SmithersDbNotFoundError(dbPath);
+export function resolveExistingSmithersDbPath(options: SqliteReadOnlyOpenOptions) {
+  if (options.dbPath) {
+    const explicitDbPath = resolve(options.dbPath);
+    if (!existsSync(explicitDbPath)) throw new SmithersDbNotFoundError(explicitDbPath);
+    return explicitDbPath;
   }
+
+  if (options.dbSearchStart) {
+    const discovered = findNearestSmithersDb(options.dbSearchStart);
+    if (discovered) return discovered;
+    throw new SmithersDbNotFoundError(resolveSearchStartCandidate(options.dbSearchStart));
+  }
+
+  const discovered = findNearestSmithersDb(options.projectRoot);
+  if (discovered) return discovered;
+  throw new SmithersDbNotFoundError(resolveSmithersDbPath(options.projectRoot));
+}
+
+function findNearestSmithersDb(start: string) {
+  let current = resolveSearchStartDirectory(start);
+  while (true) {
+    const candidate = resolveSmithersDbPath(current);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function resolveSearchStartCandidate(start: string) {
+  return resolveSmithersDbPath(resolveSearchStartDirectory(start));
+}
+
+function resolveSearchStartDirectory(start: string) {
+  const resolved = resolve(start);
+  try {
+    if (statSync(resolved).isDirectory()) return resolved;
+  } catch {
+    // Fall through to file-like path detection below.
+  }
+  const parsed = parse(resolved);
+  return parsed.ext || basenameLike(parsed.base) ? dirname(resolved) : resolved;
+}
+
+function basenameLike(base: string) {
+  return base.includes('.');
+}
+
+export function openSmithersDbReadOnly(options: SqliteReadOnlyOpenOptions): SmithersDbReadOnlyHandle {
+  const dbPath = resolveExistingSmithersDbPath(options);
 
   const sqlite = new Database(dbPath, { readonly: true });
   let closed = false;

@@ -120,6 +120,8 @@ export type SmithersRunCursors = {
 export type SmithersRunEventsResult = {
   events: SmithersRunEvent[];
   cursors: SmithersRunCursors;
+  /** Optional for backward compatibility; present when event JSON parsing produced warnings. */
+  parseWarnings?: SmithersParseWarning[];
 };
 
 export type SmithersRunDetail = {

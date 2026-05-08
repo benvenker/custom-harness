@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -12,14 +12,12 @@ function smithersDbPath(projectRoot: string) {
   return join(projectRoot, 'smithers.db');
 }
 
-function createWritableFixtureDb(projectRoot: string) {
+function createWritableFixtureDb(projectRoot: string, value = 'before') {
   const dbPath = smithersDbPath(projectRoot);
   const db = new Database(dbPath);
   try {
-    db.exec(`
-      CREATE TABLE probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO probe (value) VALUES ('before');
-    `);
+    db.exec('CREATE TABLE probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);');
+    db.query('INSERT INTO probe (value) VALUES (?)').run(value);
   } finally {
     db.close();
   }
@@ -262,6 +260,80 @@ function createSmithersMappingFixtureDb(projectRoot: string) {
   return dbPath;
 }
 
+type SmithersRunFixture = {
+  runId: string;
+  workflowName: string;
+  workflowPath?: string | null;
+  status?: string;
+  createdAtMs: number;
+};
+
+function createSmithersRunsFixtureDb(projectRoot: string, runs: SmithersRunFixture[]) {
+  const dbPath = smithersDbPath(projectRoot);
+  const db = new Database(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        parent_run_id TEXT,
+        workflow_name TEXT NOT NULL,
+        workflow_path TEXT,
+        workflow_hash TEXT,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        started_at_ms INTEGER,
+        finished_at_ms INTEGER,
+        heartbeat_at_ms INTEGER,
+        runtime_owner_id TEXT,
+        cancel_requested_at_ms INTEGER,
+        hijack_requested_at_ms INTEGER,
+        hijack_target TEXT,
+        vcs_type TEXT,
+        vcs_root TEXT,
+        vcs_revision TEXT,
+        error_json TEXT,
+        config_json TEXT
+      );
+    `);
+
+    const insertRun = db.query(`
+      INSERT INTO _smithers_runs (
+        run_id, parent_run_id, workflow_name, workflow_path, workflow_hash, status,
+        created_at_ms, started_at_ms, finished_at_ms, heartbeat_at_ms, runtime_owner_id,
+        cancel_requested_at_ms, hijack_requested_at_ms, hijack_target, vcs_type, vcs_root,
+        vcs_revision, error_json, config_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const run of runs) {
+      insertRun.run(
+        run.runId,
+        null,
+        run.workflowName,
+        run.workflowPath ?? join(projectRoot, `.smithers/workflows/${run.workflowName}.tsx`),
+        `hash-${run.runId}`,
+        run.status ?? 'finished',
+        run.createdAtMs,
+        run.status === 'running' || run.status === 'continued' ? run.createdAtMs + 1 : null,
+        run.status === 'finished' ? run.createdAtMs + 10 : null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+    }
+  } finally {
+    db.close();
+  }
+  return dbPath;
+}
+
 function schemaSnapshot(dbPath: string) {
   const db = new Database(dbPath, { readonly: true });
   try {
@@ -295,6 +367,14 @@ async function loadRunReader() {
   return await import('../src/smithersProject/runReader.js');
 }
 
+function listSourceFiles(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return listSourceFiles(path);
+    return /\.(ts|tsx|js|mjs|cjs)$/.test(entry.name) ? [path] : [];
+  }).sort();
+}
+
 async function maybeAsync<T>(value: T | Promise<T>): Promise<T> {
   return await Promise.resolve(value);
 }
@@ -309,8 +389,98 @@ describe('Smithers read-only SQLite opener', () => {
     const error = await captureError(() => openSmithersDbReadOnly({ projectRoot }));
 
     expect(error).toBeInstanceOf(Error);
+    expect((error as { code?: string }).code).toBe('SMITHERS_DB_NOT_FOUND');
     expect(String((error as Error).message)).toMatch(/smithers\.db|not found|missing/i);
     expect(existsSync(dbPath)).toBe(false);
+  });
+
+  it('fails with SMITHERS_DB_NOT_FOUND from a nested search start without creating any smithers.db files', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-nested-missing-db-');
+    const nestedProjectRoot = join(projectRoot, 'packages/app');
+    const workflowDir = join(nestedProjectRoot, '.smithers/workflows');
+    const workflowPath = join(workflowDir, 'foo.tsx');
+    mkdirSync(workflowDir, { recursive: true });
+    writeFileSync(workflowPath, 'export default null;\n');
+
+    const possibleCreatedDbPaths = [
+      smithersDbPath(projectRoot),
+      smithersDbPath(join(projectRoot, 'packages')),
+      smithersDbPath(nestedProjectRoot),
+      smithersDbPath(join(nestedProjectRoot, '.smithers')),
+      smithersDbPath(workflowDir),
+    ];
+    for (const dbPath of possibleCreatedDbPaths) {
+      expect(existsSync(dbPath), `${dbPath} should not exist before opening`).toBe(false);
+    }
+
+    const { openSmithersDbReadOnly } = await loadReadOnlyOpener();
+    const error = await captureError(() => (openSmithersDbReadOnly as any)({
+      projectRoot: nestedProjectRoot,
+      dbSearchStart: workflowPath,
+    }));
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as { code?: string }).code).toBe('SMITHERS_DB_NOT_FOUND');
+    expect(String((error as Error).message)).toMatch(/smithers\.db|not found|missing/i);
+    for (const dbPath of possibleCreatedDbPaths) {
+      expect(existsSync(dbPath), `${dbPath} should not be created by read-only discovery`).toBe(false);
+    }
+  });
+
+  it('resolves the nearest parent smithers.db from a nested workflow-like dbSearchStart and remains read-only', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-nearest-db-');
+    const parentDbPath = createWritableFixtureDb(projectRoot, 'parent-db');
+    const nestedProjectRoot = join(projectRoot, 'packages/app');
+    const workflowDir = join(nestedProjectRoot, '.smithers/workflows');
+    const workflowPath = join(workflowDir, 'foo.tsx');
+    mkdirSync(workflowDir, { recursive: true });
+    writeFileSync(workflowPath, 'export default null;\n');
+
+    const { openSmithersDbReadOnly } = await loadReadOnlyOpener();
+    const handle = await maybeAsync((openSmithersDbReadOnly as any)({
+      projectRoot: nestedProjectRoot,
+      dbSearchStart: workflowPath,
+    }));
+    try {
+      expect(resolve(handle.dbPath)).toBe(resolve(parentDbPath));
+      await expect(maybeAsync(handle.queryAll('SELECT value FROM probe ORDER BY id'))).resolves.toEqual([
+        { value: 'parent-db' },
+      ]);
+
+      for (const sql of [
+        "INSERT INTO probe (value) VALUES ('after')",
+        'CREATE TABLE should_not_exist (id INTEGER)',
+        'DROP TABLE probe',
+        'PRAGMA user_version = 123',
+      ]) {
+        const error = await captureError(() => handle.execForTest(sql));
+        expect(error).toBeInstanceOf(Error);
+        expect(String((error as Error).message)).toMatch(/readonly|read-only|query_only|not authorized|write/i);
+      }
+    } finally {
+      handle.close();
+    }
+  });
+
+  it('uses an explicit dbPath before projectRoot discovery when both databases exist', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-project-db-');
+    const explicitDbRoot = tempProject('custom-harness-smithers-explicit-db-');
+    createWritableFixtureDb(projectRoot, 'project-root-db');
+    const explicitDbPath = createWritableFixtureDb(explicitDbRoot, 'explicit-db');
+
+    const { openSmithersDbReadOnly } = await loadReadOnlyOpener();
+    const handle = await maybeAsync((openSmithersDbReadOnly as any)({
+      projectRoot,
+      dbPath: explicitDbPath,
+    }));
+    try {
+      expect(resolve(handle.dbPath)).toBe(resolve(explicitDbPath));
+      await expect(maybeAsync(handle.queryAll('SELECT value FROM probe ORDER BY id'))).resolves.toEqual([
+        { value: 'explicit-db' },
+      ]);
+    } finally {
+      handle.close();
+    }
   });
 
   it('opens an existing project-root smithers.db read-only and can read through the seam', async () => {
@@ -393,11 +563,8 @@ describe('SmithersRunReader contract', () => {
   });
 
   it('does not import Smithers schema mutators or legacy CustomHarness run artifacts', () => {
-    const modulePaths = [
-      'src/smithersProject/sqliteReadOnly.ts',
-      'src/smithersProject/runReaderTypes.ts',
-      'src/smithersProject/runReader.ts',
-    ];
+    const modulePaths = listSourceFiles('src/smithersProject');
+    expect(modulePaths).toContain('src/smithersProject/runReader.ts');
 
     for (const modulePath of modulePaths) {
       expect(existsSync(modulePath), `${modulePath} should exist`).toBe(true);
@@ -405,12 +572,123 @@ describe('SmithersRunReader contract', () => {
       expect(source, modulePath).not.toMatch(
         /from ['"]@smithers-orchestrator\/db\/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(/,
       );
+      expect(source, modulePath).not.toMatch(/openSmithersDb\(|findAndOpenDb\(|@smithers-orchestrator\/cli\/src\/find-db/);
       expect(source, modulePath).not.toMatch(/createRunRecorder|runs\/index\.json|plan\.json|run\.json|events\.jsonl/);
+    }
+  });
+
+  it('does not manually write to Smithers internal tables from project-mode code', () => {
+    const projectModeSourceFiles = [
+      ...listSourceFiles('src/smithersProject'),
+      'src/server.ts',
+    ];
+    const forbiddenSmithersWrite = /\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE(?:\s+OR\s+\w+)?\s+|DELETE\s+FROM|CREATE(?:\s+TEMP(?:ORARY)?)?\s+(?:TABLE|INDEX|TRIGGER|VIEW)|DROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)|ALTER\s+TABLE)\s+[`'\"]?_smithers_/i;
+
+    for (const modulePath of projectModeSourceFiles) {
+      const source = readFileSync(modulePath, 'utf8').replace(/\s+/g, ' ');
+      expect(source, modulePath).not.toMatch(forbiddenSmithersWrite);
     }
   });
 });
 
 describe('SmithersRunReader data mapping', () => {
+  it('listRuns({ workflowId, limit }) applies the workflow filter before limiting rows', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-filter-before-limit-');
+    createSmithersRunsFixtureDb(projectRoot, [
+      ...Array.from({ length: 10 }, (_, index) => ({
+        runId: `bar-newer-${index}`,
+        workflowName: 'bar',
+        workflowPath: join(projectRoot, '.smithers/workflows/bar.tsx'),
+        createdAtMs: 10_000 - index,
+      })),
+      {
+        runId: 'foo-newest-match',
+        workflowName: 'foo',
+        workflowPath: join(projectRoot, '.smithers/workflows/foo.tsx'),
+        createdAtMs: 1_000,
+      },
+      {
+        runId: 'foo-second-newest-match',
+        workflowName: 'foo',
+        workflowPath: join(projectRoot, '.smithers/workflows/foo.tsx'),
+        createdAtMs: 900,
+      },
+      {
+        runId: 'foo-third-match-outside-limit',
+        workflowName: 'foo',
+        workflowPath: join(projectRoot, '.smithers/workflows/foo.tsx'),
+        createdAtMs: 800,
+      },
+    ]);
+
+    const { createSmithersRunReader } = await loadRunReader();
+    const reader = await maybeAsync(createSmithersRunReader({ projectRoot }));
+    try {
+      const fooRuns = await reader.listRuns({ workflowId: 'foo', limit: 2 });
+
+      expect(fooRuns.map((run) => run.runId)).toEqual(['foo-newest-match', 'foo-second-newest-match']);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('listRuns({ workflowId, status: running }) includes continued runs for the matching workflow', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-running-continued-');
+    createSmithersRunsFixtureDb(projectRoot, [
+      { runId: 'foo-running', workflowName: 'foo', status: 'running', createdAtMs: 2_000 },
+      { runId: 'foo-continued', workflowName: 'foo', status: 'continued', createdAtMs: 1_900 },
+      { runId: 'foo-finished', workflowName: 'foo', status: 'finished', createdAtMs: 1_800 },
+      { runId: 'bar-running', workflowName: 'bar', status: 'running', createdAtMs: 1_700 },
+    ]);
+
+    const { createSmithersRunReader } = await loadRunReader();
+    const reader = await maybeAsync(createSmithersRunReader({ projectRoot }));
+    try {
+      const runningFooRuns = await reader.listRuns({ workflowId: 'foo', status: 'running', limit: 10 });
+
+      expect(runningFooRuns.map((run) => [run.runId, run.status])).toEqual([
+        ['foo-running', 'running'],
+        ['foo-continued', 'continued'],
+      ]);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('listRuns({ workflowId }) matches workflow path suffix when workflow name differs', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-path-only-match-');
+    createSmithersRunsFixtureDb(projectRoot, [
+      {
+        runId: 'foo-path-only',
+        workflowName: 'renamed-workflow',
+        workflowPath: join(projectRoot, '.smithers/workflows/foo.tsx'),
+        createdAtMs: 2_000,
+      },
+      {
+        runId: 'bar-path',
+        workflowName: 'bar',
+        workflowPath: join(projectRoot, '.smithers/workflows/bar.tsx'),
+        createdAtMs: 1_900,
+      },
+    ]);
+
+    const { createSmithersRunReader } = await loadRunReader();
+    const reader = await maybeAsync(createSmithersRunReader({ projectRoot }));
+    try {
+      const fooRuns = await reader.listRuns({ workflowId: 'foo', limit: 10 });
+
+      expect(fooRuns).toEqual([
+        expect.objectContaining({
+          runId: 'foo-path-only',
+          workflowName: 'renamed-workflow',
+          workflowPath: join(projectRoot, '.smithers/workflows/foo.tsx'),
+        }),
+      ]);
+    } finally {
+      reader.close();
+    }
+  });
+
   it('listRuns() returns Smithers run rows and filters by workflow id path/name', async () => {
     const projectRoot = tempProject('custom-harness-smithers-mapping-list-');
     createSmithersMappingFixtureDb(projectRoot);
@@ -593,6 +871,54 @@ describe('SmithersRunReader data mapping', () => {
         ],
         cursors: { nextEventSeq: 3 },
       });
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('listEvents() returns parse warnings for malformed payload JSON without dropping the event', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-events-bad-json-');
+    createSmithersMappingFixtureDb(projectRoot);
+
+    const { createSmithersRunReader } = await loadRunReader();
+    const reader = await maybeAsync(createSmithersRunReader({ projectRoot }));
+    try {
+      const result = await (reader.listEvents as any)('run-bad-json', { limit: 10 });
+
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          seq: 1,
+          type: 'attempt_failed',
+          payload: null,
+          nodeId: null,
+          iteration: null,
+          attempt: null,
+        }),
+      ]);
+      expect(result.parseWarnings).toEqual([
+        expect.objectContaining({
+          field: 'event.payloadJson',
+          runId: 'run-bad-json',
+          seq: 1,
+        }),
+      ]);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('listEvents() preserves the event cursor on empty pages after afterSeq', async () => {
+    const projectRoot = tempProject('custom-harness-smithers-events-empty-cursor-');
+    createSmithersMappingFixtureDb(projectRoot);
+
+    const { createSmithersRunReader } = await loadRunReader();
+    const reader = await maybeAsync(createSmithersRunReader({ projectRoot }));
+    try {
+      const result = await (reader.listEvents as any)('run-main', { afterSeq: 3, limit: 10 });
+
+      expect(result.events).toEqual([]);
+      expect(result.cursors.nextEventSeq).toBeGreaterThanOrEqual(3);
+      expect(result.cursors.nextEventSeq).toBe(3);
     } finally {
       reader.close();
     }

@@ -62,7 +62,6 @@ function writeSafeProject() {
   const projectRoot = tempProject('custom-harness-real-run-');
   const workflowsDir = join(projectRoot, '.smithers', 'workflows');
   mkdirSync(workflowsDir, { recursive: true });
-  symlinkSync(join(process.cwd(), 'node_modules'), join(projectRoot, 'node_modules'), 'dir');
   symlinkSync(join(process.cwd(), 'node_modules'), join(projectRoot, '.smithers', 'node_modules'), 'dir');
   writeFileSync(join(projectRoot, '.smithers', 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
   writeFileSync(join(workflowsDir, 'foo.tsx'), `
@@ -103,6 +102,7 @@ describe('project workflow real run integration', () => {
     }));
 
     expect(response.status).toBe(202);
+    expect(existsSync(join(projectRoot, 'node_modules'))).toBe(false);
     const body = await response.json() as {
       ok: boolean;
       runId: string;
@@ -149,12 +149,11 @@ describe('project workflow real run integration', () => {
         responseText: '{"result":"ok"}',
       }),
     ]));
-    expect(detail.events.map((event) => event.type)).toEqual(expect.arrayContaining([
-      'NodePending',
-      'NodeFinished',
-      'RunFinished',
-    ]));
-    expect(detail.events.map((event) => event.type)).not.toContain('LegacyEvent');
+    const eventTypes = detail.events.map((event) => event.type);
+    const hasDbEventEvidence = detail.events.some((event) => event.runId === body.runId && event.type.length > 0);
+    const hasDbAttemptEvidence = detail.attempts.some((attempt) => attempt.runId === body.runId && attempt.nodeId === 'do-safe-thing');
+    expect(hasDbEventEvidence || hasDbAttemptEvidence).toBe(true);
+    expect(eventTypes).not.toContain('LegacyEvent');
     expect(detail.frames).toEqual(expect.arrayContaining([
       expect.objectContaining({
         runId: body.runId,

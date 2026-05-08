@@ -278,6 +278,39 @@ describe('HTTP server DB-backed Smithers run inspection API', () => {
     expect(closeCalls).toBe(1);
   });
 
+  it('passes parse warnings through from the Smithers events reader', async () => {
+    const events = smithersEventsResult({
+      events: [{
+        runId: 'reader-events-warning-run',
+        seq: 21,
+        timestampMs: 1200,
+        type: 'reader.bad-json',
+        payloadJson: '{bad-json',
+        payload: null,
+        nodeId: null,
+        iteration: null,
+        attempt: null,
+      }],
+      cursors: { nextEventSeq: 21 },
+      parseWarnings: [{
+        field: 'event.payloadJson',
+        message: 'Expected property name or } in JSON at position 1',
+        runId: 'reader-events-warning-run',
+        seq: 21,
+      }],
+    } as Partial<SmithersRunEventsResult>);
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot: process.cwd(),
+      createSmithersRunReader: () => fakeSmithersRunReader({ events }),
+    });
+
+    const response = await handler(new Request('http://localhost/api/smithers/runs/reader-events-warning-run/events'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, ...events });
+  });
+
   it('uses afterSeq as an alias for eventsAfterSeq on detail requests', async () => {
     const calls: unknown[] = [];
     const handler = createHarnessServerHandler({

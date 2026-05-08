@@ -1,6 +1,6 @@
 import type { AttemptRow, NodeRow, RunRow } from '@smithers-orchestrator/db/adapter';
 import { basename, normalize, sep } from 'node:path';
-import { openSmithersDbReadOnly, type SmithersDbReadOnlyHandle } from './sqliteReadOnly.js';
+import { openSmithersDbReadOnly, type SmithersDbReadOnlyHandle, type SqliteReadOnlyOpenOptions } from './sqliteReadOnly.js';
 import type {
   GetRunDetailOptions,
   ListEventsOptions,
@@ -18,9 +18,7 @@ import type {
   SmithersRunSummary,
 } from './runReaderTypes.js';
 
-type CreateSmithersRunReaderOptions = {
-  projectRoot: string;
-};
+type CreateSmithersRunReaderOptions = SqliteReadOnlyOpenOptions;
 
 type FrameRow = {
   runId: string;
@@ -58,8 +56,11 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
   return {
     async listRuns(options: ListRunsOptions = {}) {
       assertOpen();
+      if (options.workflowId) {
+        return listWorkflowRuns(handle, options).map((row: RunRow) => toRunSummary(row, []));
+      }
       const rows = (await handle.adapter.listRuns(options.limit ?? 50, options.status)) as RunRow[];
-      return rows.filter((row: RunRow) => matchesWorkflowId(row, options.workflowId)).map((row: RunRow) => toRunSummary(row, []));
+      return rows.map((row: RunRow) => toRunSummary(row, []));
     },
 
     async getRunDetail(runId: string, options: GetRunDetailOptions = {}) {
@@ -100,17 +101,21 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
     async listEvents(runId: string, options: ListEventsOptions = {}) {
       assertOpen();
       const parseWarnings: SmithersParseWarning[] = [];
-      const rows = await handle.adapter.listEventHistory(runId, {
-        afterSeq: options.afterSeq ?? -1,
-        limit: clampPositiveInteger(options.limit ?? 200, 1, 1000),
-        nodeId: options.nodeId,
-        types: options.types,
-        sinceTimestampMs: options.sinceTimestampMs,
-      });
+      const [rows, lastEventSeq] = await Promise.all([
+        handle.adapter.listEventHistory(runId, {
+          afterSeq: options.afterSeq ?? -1,
+          limit: clampPositiveInteger(options.limit ?? 200, 1, 1000),
+          nodeId: options.nodeId,
+          types: options.types,
+          sinceTimestampMs: options.sinceTimestampMs,
+        }),
+        handle.adapter.getLastEventSeq(runId),
+      ]);
       const events = (rows as Array<Record<string, unknown>>).map((event) => toRunEvent(runId, event, parseWarnings));
       return {
         events,
-        cursors: eventCursor(events),
+        cursors: eventCursor(events, lastEventSeq, options.afterSeq),
+        ...(parseWarnings.length > 0 ? { parseWarnings } : {}),
       } satisfies SmithersRunEventsResult;
     },
 
@@ -268,6 +273,53 @@ async function listOutputs(handle: SmithersDbReadOnlyHandle, nodes: SmithersRunN
   return outputs;
 }
 
+function listWorkflowRuns(handle: SmithersDbReadOnlyHandle, options: ListRunsOptions): RunRow[] {
+  const workflowId = options.workflowId;
+  if (!workflowId) return [];
+
+  const limit = clampPositiveInteger(options.limit ?? 50, 1, 1000);
+  const whereParts = [
+    `(workflow_name = ? OR workflow_path LIKE ? ESCAPE '\\' OR workflow_path LIKE ? ESCAPE '\\')`,
+  ];
+  const params: Array<string | number> = [
+    workflowId,
+    `%/.smithers/workflows/${escapeSqlLike(workflowId)}.tsx`,
+    `%\\.smithers\\workflows\\${escapeSqlLike(workflowId)}.tsx`,
+  ];
+
+  if (options.status) {
+    if (options.status === 'running') {
+      whereParts.push(`status IN ('running', 'continued')`);
+    } else {
+      whereParts.push(`status = ?`);
+      params.push(options.status);
+    }
+  }
+  params.push(limit);
+
+  type RunSqlRow = Omit<RunRow, 'status'> & { status: string };
+  return handle.queryAll<RunSqlRow>(`
+    SELECT
+      run_id AS runId,
+      parent_run_id AS parentRunId,
+      workflow_name AS workflowName,
+      workflow_path AS workflowPath,
+      workflow_hash AS workflowHash,
+      status,
+      created_at_ms AS createdAtMs,
+      started_at_ms AS startedAtMs,
+      finished_at_ms AS finishedAtMs,
+      heartbeat_at_ms AS heartbeatAtMs,
+      runtime_owner_id AS runtimeOwnerId,
+      error_json AS errorJson,
+      config_json AS configJson
+    FROM _smithers_runs
+    WHERE ${whereParts.join(' AND ')}
+    ORDER BY created_at_ms DESC, run_id ASC
+    LIMIT ?
+  `, params) as RunRow[];
+}
+
 function matchesWorkflowId(row: RunRow, workflowId?: string) {
   if (!workflowId) return true;
   if (row.workflowName === workflowId) return true;
@@ -278,12 +330,19 @@ function matchesWorkflowId(row: RunRow, workflowId?: string) {
   return normalized.endsWith(`${sep}.smithers${sep}workflows${sep}${workflowId}.tsx`);
 }
 
-function eventCursor(events: SmithersRunEvent[], lastEventSeq?: number | null) {
+function escapeSqlLike(value: string) {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function eventCursor(events: SmithersRunEvent[], lastEventSeq?: number | null, requestedAfterSeq?: number) {
   if (typeof lastEventSeq === 'number' && Number.isFinite(lastEventSeq)) {
-    return { nextEventSeq: lastEventSeq };
+    return { nextEventSeq: typeof requestedAfterSeq === 'number' ? Math.max(lastEventSeq, requestedAfterSeq) : lastEventSeq };
   }
-  if (events.length === 0) return { nextEventSeq: null };
-  return { nextEventSeq: Math.max(...events.map((event) => event.seq)) };
+  if (events.length === 0) {
+    return { nextEventSeq: typeof requestedAfterSeq === 'number' ? requestedAfterSeq : null };
+  }
+  const maxEventSeq = Math.max(...events.map((event) => event.seq));
+  return { nextEventSeq: typeof requestedAfterSeq === 'number' ? Math.max(maxEventSeq, requestedAfterSeq) : maxEventSeq };
 }
 
 function compareNodeRows(a: SmithersRunNode, b: SmithersRunNode) {

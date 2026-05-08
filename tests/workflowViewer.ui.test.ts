@@ -174,6 +174,31 @@ type SmithersRunOverlayHelper = {
   };
 };
 
+type ProjectRenderedGraphDecision = {
+  mode: 'preview' | 'live' | 'live-overlay-error';
+  graph: OverlayRenderGraph | null;
+  provenance: {
+    liveSmithers: boolean;
+    label?: string;
+    status?: string;
+    error?: string;
+  };
+  visibleCopy: string[];
+  error?: string;
+};
+
+type ProjectLiveStateHelper = {
+  deriveProjectRenderedGraph(options: {
+    previewGraph: OverlayRenderGraph;
+    liveMode?: boolean;
+    liveDetail?: SmithersRunDetailFixture | null;
+    overlayBuilder?: (options: {
+      graph: OverlayRenderGraph;
+      detail: SmithersRunDetailFixture;
+    }) => { graph: OverlayRenderGraph; provenanceLabel: string; visibleCopy?: string[] };
+  }): ProjectRenderedGraphDecision;
+};
+
 async function loadInspectorHelper(): Promise<{
   buildStudioInspectorState: BuildStudioInspectorState;
 }> {
@@ -188,6 +213,10 @@ async function loadWorkflowRunUiHelper(): Promise<WorkflowRunUiHelper> {
 
 async function loadSmithersRunOverlayHelper(): Promise<SmithersRunOverlayHelper> {
   return import('../src/ui/smithersRunOverlay.js') as Promise<SmithersRunOverlayHelper>;
+}
+
+async function loadProjectLiveStateHelper(): Promise<ProjectLiveStateHelper> {
+  return import('../src/ui/projectLiveState.js') as Promise<ProjectLiveStateHelper>;
 }
 
 function projectInspectorState(
@@ -527,6 +556,77 @@ describe('project workflow live run inspection helpers', () => {
     const html = readFileSync('web/index.html', 'utf8');
     const branchMatch = html.match(/if \(currentWorkflowId\) \{(?<body>[\s\S]*?)\n    \}\n\n    if \(!currentRunMeta/);
     expect(branchMatch?.groups?.body ?? '').not.toContain('waitForRunToRender(');
+  });
+});
+
+describe('project workflow live render state helpers', () => {
+  it('renders a refreshed preview graph through the DB overlay when live Smithers detail exists', async () => {
+    const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+    const refreshedPreview = previewGraphForOverlay([
+      previewTaskNode({ id: 'ui-task', status: 'running', smithers: { nodeId: 'smithers-task' } }),
+    ]);
+    const liveDetail = smithersRunDetailFixture({
+      run: { runId: 'live-run', status: 'finished', workflowName: 'foo', workflowPath: '.smithers/workflows/foo.tsx' },
+      nodes: [{
+        runId: 'live-run',
+        nodeId: 'smithers-task',
+        iteration: 0,
+        state: 'finished',
+        status: 'finished',
+        outputTable: 'task_output',
+        label: 'Smithers Task',
+      }],
+    });
+
+    const decision = deriveProjectRenderedGraph({
+      previewGraph: refreshedPreview,
+      liveMode: true,
+      liveDetail,
+    });
+
+    expect(decision.mode).toBe('live');
+    expect(decision.provenance).toEqual(expect.objectContaining({
+      liveSmithers: true,
+      label: 'Smithers SQLite · live run',
+      status: 'finished',
+    }));
+    expect(decision.graph?.runId).toBe('live-run');
+    expect(decision.graph?.runStatus).toBe('finished');
+    const renderedNode = decision.graph?.nodes.find((node) => node.id === 'ui-task');
+    expect(renderedNode?.status).toBe('done');
+    expect(renderedNode?.smithers).toEqual(expect.objectContaining({
+      nodeId: 'smithers-task',
+      rawStatus: 'finished',
+      rawState: 'finished',
+      statusSource: 'smithers-db',
+    }));
+    expect(decision.visibleCopy).toContain('Smithers SQLite · live run');
+    expect(decision.visibleCopy).toContain('raw status: finished');
+  });
+
+  it('does not return a raw preview graph under live Smithers provenance when overlaying fails', async () => {
+    const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+    const rawPreview = previewGraphForOverlay([
+      previewTaskNode({ id: 'ui-task', status: 'running', smithers: { nodeId: 'smithers-task' } }),
+    ]);
+
+    const decision = deriveProjectRenderedGraph({
+      previewGraph: rawPreview,
+      liveMode: true,
+      liveDetail: smithersRunDetailFixture(),
+      overlayBuilder: () => {
+        throw new Error('overlay exploded');
+      },
+    });
+
+    expect(decision.mode).toBe('live-overlay-error');
+    expect(decision.provenance.liveSmithers).toBe(false);
+    expect(decision.provenance.error).toContain('overlay exploded');
+    expect(decision.error).toContain('overlay exploded');
+    if (decision.graph) {
+      expect(decision.graph.nodes.find((node) => node.id === 'ui-task')?.status).toBe('running');
+      expect(decision.provenance.label).not.toBe('Smithers SQLite · live run');
+    }
   });
 });
 

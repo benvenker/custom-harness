@@ -1325,6 +1325,7 @@
   let studioInspectorHelperPromise = null;
   let workflowRunUiHelperPromise = null;
   let smithersRunOverlayHelperPromise = null;
+  let projectLiveStateHelperPromise = null;
   let runRefreshTimer = null;
   let projectRunInspection = null;
   let projectRunInspectionSeq = 0;
@@ -1599,6 +1600,35 @@
       smithersRunOverlayHelperPromise = import("/src/ui/smithersRunOverlay.js");
     }
     return smithersRunOverlayHelperPromise;
+  }
+
+  function loadProjectLiveStateHelper() {
+    if (!projectLiveStateHelperPromise) {
+      projectLiveStateHelperPromise = import("/src/ui/projectLiveState.js");
+    }
+    return projectLiveStateHelperPromise;
+  }
+
+  async function renderProjectGraphForCurrentState({ previewGraph, liveMode = false, liveDetail = null }) {
+    const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+    const decision = deriveProjectRenderedGraph({ previewGraph, liveMode, liveDetail });
+    if (decision.mode === "live") {
+      SAMPLES._project = decision.graph;
+      loadSample("_project");
+      setProvenance({ liveSmithers: true, status: decision.provenance.status });
+      return decision;
+    }
+    if (decision.mode === "live-overlay-error") {
+      console.warn("smithers live overlay unavailable", decision.error);
+      SAMPLES._project = decision.graph;
+      loadSample("_project");
+      setProvenance({ liveSmithers: false, status: "preview", notes: decision.error });
+      setRunActionStatus(`Live overlay failed · ${decision.error}`, "error");
+      return decision;
+    }
+    SAMPLES._project = decision.graph;
+    loadSample("_project");
+    return decision;
   }
 
   function workflowPathForCurrentProject() {
@@ -2033,6 +2063,10 @@
       projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
     });
     inspector.querySelector("#applyNodeOutputBtn")?.addEventListener("click", async () => {
+      if (currentRunMeta?.liveSmithers) {
+        setRunActionStatus("Pretend output is preview-only while inspecting a live Smithers run", "error");
+        return;
+      }
       const area = inspector.querySelector("#nodeOutputEditArea");
       if (!area || !selectedId) return;
       const text = area.value.trim();
@@ -2051,6 +2085,10 @@
       }
     });
     inspector.querySelector("#clearNodeOutputBtn")?.addEventListener("click", async () => {
+      if (currentRunMeta?.liveSmithers) {
+        setRunActionStatus("Pretend output is preview-only while inspecting a live Smithers run", "error");
+        return;
+      }
       if (!selectedId) return;
       projectNodeOutputs.delete(selectedId);
       await refreshProjectGraphFromInput();
@@ -2541,14 +2579,7 @@
       if (currentWorkflowGraph && currentRunId === state.runId) {
         currentWorkflowGraph.runId = state.runId;
         currentWorkflowGraph.runStatus = status;
-        try {
-          const { buildSmithersRunOverlayState } = await loadSmithersRunOverlayHelper();
-          SAMPLES._project = buildSmithersRunOverlayState({ graph: currentWorkflowGraph, detail }).graph;
-        } catch (overlayErr) {
-          console.warn("smithers live overlay unavailable", overlayErr);
-          SAMPLES._project = currentWorkflowGraph;
-        }
-        loadSample("_project");
+        await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: true, liveDetail: detail });
       }
       runIdEl.textContent = state.runId;
       setProvenance({ liveSmithers: true, status });
@@ -2645,8 +2676,7 @@
         if (currentWorkflowGraph) {
           currentWorkflowGraph.runId = result.runId;
           currentWorkflowGraph.runStatus = result.status;
-          SAMPLES._project = currentWorkflowGraph;
-          loadSample("_project");
+          await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: false });
         }
         startProjectRunInspection({
           runId: result.runId,
@@ -2817,8 +2847,11 @@
       currentWorkflowId = selected;
       currentWorkflowGraph = graphResponse.graph;
       rememberProjectOutputTables(graphResponse.graph);
-      SAMPLES._project = graphResponse.graph;
-      loadSample("_project");
+      await renderProjectGraphForCurrentState({
+        previewGraph: graphResponse.graph,
+        liveMode: Boolean(currentRunMeta?.liveSmithers && currentRunMeta?.smithersRunDetail),
+        liveDetail: currentRunMeta?.smithersRunDetail,
+      });
       goalInput.placeholder = `Initial prompt is edited from the graph root node...`;
       setProvenance({ status: "project" });
       currentRunMeta = null;
@@ -2898,8 +2931,11 @@
       if (graphResponse.ok === false) throw new Error(graphResponse.error || "graph render failed");
       currentWorkflowGraph = graphResponse.graph;
       rememberProjectOutputTables(graphResponse.graph);
-      SAMPLES._project = graphResponse.graph;
-      loadSample("_project");
+      await renderProjectGraphForCurrentState({
+        previewGraph: graphResponse.graph,
+        liveMode: Boolean(currentRunMeta?.liveSmithers && currentRunMeta?.smithersRunDetail),
+        liveDetail: currentRunMeta?.smithersRunDetail,
+      });
       setRunActionStatus(`Preview updated for ${currentWorkflowId}`, "ok");
     } catch (err) {
       setRunActionStatus(`Preview failed · ${err.message}`, "error");

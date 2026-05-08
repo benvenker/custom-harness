@@ -11,6 +11,7 @@ import { loadSmithersRuntime, loadWorkflow } from './app/smithersRuntime.js';
 import { depsFromEnv } from './cli.js';
 import { planSchema, type PlannerOutput } from './planning/schema.js';
 import { smithersSnapshotToRenderGraph } from './runs/smithersGraph.js';
+import { buildSmithersWorkflowRunCommand } from './smithersProject/cli.js';
 import { createSmithersRunReader as defaultCreateSmithersRunReader } from './smithersProject/runReader.js';
 import type { GetRunDetailOptions, ListEventsOptions, ListRunsOptions, SmithersRunReader } from './smithersProject/runReaderTypes.js';
 
@@ -676,21 +677,9 @@ async function runProjectWorkflow(options: {
   workflowPath: string;
   input: Record<string, unknown>;
 }): Promise<{ runId: string; status: string }> {
-  const proc = Bun.spawn([
-    'bun',
-    'node_modules/.bin/smithers',
-    'workflow',
-    'run',
-    options.workflowId,
-    '--input',
-    JSON.stringify(options.input),
-    '--detach',
-    '--format',
-    'json',
-    '--root',
-    '.',
-  ], {
-    cwd: options.projectRoot,
+  const command = buildSmithersWorkflowRunCommand(options);
+  const proc = Bun.spawn(command.cmd, {
+    cwd: command.cwd,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -700,17 +689,17 @@ async function runProjectWorkflow(options: {
     proc.exited,
   ]);
   if (exitCode !== 0) {
-    throw new Error(`Smithers workflow run failed with exit ${exitCode}: ${stderr || stdout}`);
+    throw new Error(`Smithers workflow run failed with exit ${exitCode} via ${command.source}: ${stderr || stdout}`);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Smithers workflow run returned invalid JSON: ${message}; stdout=${stdout}; stderr=${stderr}`);
+    throw new Error(`Smithers workflow run returned invalid JSON via ${command.source}: ${message}; stdout=${stdout}; stderr=${stderr}`);
   }
   if (!isRecord(parsed) || typeof parsed.runId !== 'string') {
-    throw new Error(`Smithers workflow run response missing runId: ${stdout}`);
+    throw new Error(`Smithers workflow run response missing runId via ${command.source}: ${stdout}`);
   }
   return { runId: parsed.runId, status: typeof parsed.status === 'string' ? parsed.status : 'running' };
 }
