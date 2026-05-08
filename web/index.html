@@ -1323,7 +1323,10 @@
   // tell whether a textarea value is actually "edited" relative to the run.
   const promptBaselines = new Map();
   let studioInspectorHelperPromise = null;
+  let workflowRunUiHelperPromise = null;
   let runRefreshTimer = null;
+  let projectRunInspection = null;
+  let projectRunInspectionSeq = 0;
 
   const NODE_W = 280;
   const NODE_H = 158; // approx — actual height varies, layout tolerates
@@ -1581,6 +1584,13 @@
       studioInspectorHelperPromise = import("/src/ui/studioInspector.js");
     }
     return studioInspectorHelperPromise;
+  }
+
+  function loadWorkflowRunUiHelper() {
+    if (!workflowRunUiHelperPromise) {
+      workflowRunUiHelperPromise = import("/src/ui/workflowRunUi.js");
+    }
+    return workflowRunUiHelperPromise;
   }
 
   function workflowPathForCurrentProject() {
@@ -2137,9 +2147,9 @@
   }
 
   function runStatusKind(status) {
-    return status === "failed" || status === "error" || status === "cancelled"
+    return status === "failed" || status === "error" || status === "cancelled" || status === "canceled"
       ? "error"
-      : status === "succeeded"
+      : status === "succeeded" || status === "finished"
         ? "ok"
         : "";
   }
@@ -2193,6 +2203,11 @@
     if (!meta) {
       provBadge.classList.add("demo");
       provBadge.textContent = "demo";
+      return;
+    }
+    if (meta.liveSmithers === true) {
+      provBadge.classList.add("real");
+      provBadge.textContent = "Smithers SQLite · live run";
       return;
     }
     if (meta.status === "failed" || meta.status === "error") {
@@ -2358,6 +2373,72 @@
     throw new Error("run artifacts not ready");
   }
 
+  function startProjectRunInspection({ runId, inspectionUrl, initialStatus }) {
+    projectRunInspectionSeq += 1;
+    const seq = projectRunInspectionSeq;
+    projectRunInspection = {
+      runId,
+      inspectionUrl: inspectionUrl || `/api/smithers/runs/${encodeURIComponent(runId)}`,
+      lastEventSeq: 0,
+      notFoundRetries: 0,
+      status: initialStatus || "running",
+    };
+    pollProjectRunInspectionOnce(seq);
+  }
+
+  async function pollProjectRunInspectionOnce(seq) {
+    if (seq !== projectRunInspectionSeq || !projectRunInspection) return;
+    const state = projectRunInspection;
+    try {
+      const { buildProjectRunInspectionUrl, isTerminalSmithersRunStatus } = await loadWorkflowRunUiHelper();
+      const url = buildProjectRunInspectionUrl({
+        runId: state.runId,
+        inspectionUrl: state.inspectionUrl,
+        eventsAfterSeq: state.lastEventSeq,
+        includeOutputs: true,
+      });
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.status === 404 && state.notFoundRetries < 4) {
+        state.notFoundRetries += 1;
+        setRunActionStatus(`Waiting for Smithers run ${shortId(state.runId)} to appear in SQLite...`);
+        setTimeout(() => pollProjectRunInspectionOnce(seq), 750);
+        return;
+      }
+      if (!response.ok) throw new Error(`inspection ${response.status}`);
+      const data = await response.json();
+      if (data.ok === false) throw new Error(data.error || data.code || "inspection failed");
+      const detail = data.detail || data;
+      const status = detail?.run?.status || data.status || state.status || "unknown";
+      state.status = status;
+      state.notFoundRetries = 0;
+      if (typeof detail?.cursors?.nextEventSeq === "number") {
+        state.lastEventSeq = detail.cursors.nextEventSeq;
+      }
+      currentRunMeta = {
+        ...(currentRunMeta || {}),
+        id: state.runId,
+        inspectionUrl: state.inspectionUrl,
+        smithersRunDetail: detail,
+        liveSmithers: true,
+      };
+      if (currentWorkflowGraph && currentRunId === state.runId) {
+        currentWorkflowGraph.runId = state.runId;
+        currentWorkflowGraph.runStatus = status;
+        SAMPLES._project = currentWorkflowGraph;
+        loadSample("_project");
+      }
+      runIdEl.textContent = state.runId;
+      setProvenance({ liveSmithers: true, status });
+      setRunActionStatus(`Smithers SQLite · live run ${shortId(state.runId)} · ${status}`, runStatusKind(status));
+      if (!isTerminalSmithersRunStatus(status)) {
+        setTimeout(() => pollProjectRunInspectionOnce(seq), status === "running" ? 1500 : 3000);
+      }
+    } catch (err) {
+      if (seq !== projectRunInspectionSeq) return;
+      setRunActionStatus(`Live inspection failed · ${err.message}`, "error");
+    }
+  }
+
   function attachOutputMetadata(graph, eventsText) {
     if (!eventsText) return;
     const byId = new Map(graph.nodes.map(node => [node.id, node]));
@@ -2418,15 +2499,37 @@
       setRunActionStatus(`Starting ${currentWorkflowId} through Smithers...`);
       try {
         const input = currentProjectInput();
-        const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/run`, { input });
-        setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`, runStatusKind(result.status));
+        const { buildProjectWorkflowRunPayload } = await loadWorkflowRunUiHelper();
+        const result = await postJson(
+          `/api/workflows/${encodeURIComponent(currentWorkflowId)}/run`,
+          buildProjectWorkflowRunPayload(input),
+        );
+        setRunActionStatus(`Started ${shortId(result.runId)} · opening Smithers SQLite live inspection`, runStatusKind(result.status));
         runIdEl.textContent = result.runId;
+        setCurrentRunId(result.runId);
+        currentRunMeta = {
+          id: result.runId,
+          goal: currentProjectInputText(),
+          forkedFrom: null,
+          isSmithersWorkflow: true,
+          workflowPath: workflowPathForCurrentProject(),
+          input,
+          existingOverrides: {},
+          inspectionUrl: result.inspection?.url || `/api/smithers/runs/${encodeURIComponent(result.runId)}`,
+          liveSmithers: true,
+        };
+        setProvenance({ liveSmithers: true, status: result.status });
         if (currentWorkflowGraph) {
           currentWorkflowGraph.runId = result.runId;
           currentWorkflowGraph.runStatus = result.status;
           SAMPLES._project = currentWorkflowGraph;
           loadSample("_project");
         }
+        startProjectRunInspection({
+          runId: result.runId,
+          inspectionUrl: result.inspection?.url,
+          initialStatus: result.status,
+        });
       } catch (err) {
         setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
       } finally {

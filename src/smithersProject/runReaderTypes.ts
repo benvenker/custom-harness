@@ -140,6 +140,7 @@ export type ListRunsOptions = {
 };
 
 export type GetRunDetailOptions = {
+  eventsAfterSeq?: number;
   eventLimit?: number;
   frameLimit?: number;
   includeOutputs?: boolean;

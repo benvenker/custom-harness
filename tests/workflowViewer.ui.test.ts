@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 type InspectorNode = {
   id: string;
@@ -43,12 +44,36 @@ type BuildStudioInspectorState = (options: {
   sourceValuesByPath?: Record<string, string>;
 }) => InspectorState;
 
+type ProjectRunInspectionResult = {
+  runId: string;
+  finalStatus: string | null;
+  polls: number;
+  fetchedUrls: string[];
+};
+
+type WorkflowRunUiHelper = {
+  buildProjectWorkflowRunPayload(input: Record<string, unknown>, extras?: Record<string, unknown>): Record<string, unknown>;
+  isTerminalSmithersRunStatus(status: string | null | undefined): boolean;
+  pollProjectRunInspection(options: {
+    runId: string;
+    inspectionUrl?: string;
+    fetch: (input: string, init?: RequestInit) => Promise<Response>;
+    setTimeout?: (callback: () => void, delayMs: number) => unknown;
+    maxNotFoundRetries?: number;
+    intervalMs?: number;
+  }): Promise<ProjectRunInspectionResult>;
+};
+
 async function loadInspectorHelper(): Promise<{
   buildStudioInspectorState: BuildStudioInspectorState;
 }> {
   return import('../src/ui/studioInspector.js') as Promise<{
     buildStudioInspectorState: BuildStudioInspectorState;
   }>;
+}
+
+async function loadWorkflowRunUiHelper(): Promise<WorkflowRunUiHelper> {
+  return import('../src/ui/workflowRunUi.js') as Promise<WorkflowRunUiHelper>;
 }
 
 function projectInspectorState(
@@ -211,5 +236,99 @@ describe('workflow viewer studio inspector state', () => {
     expect(copy).not.toContain('Run with edits');
     expect(copy).not.toContain('Temporary override');
     expect(visibleActionLabels(state)).not.toContain('Start run with override');
+  });
+});
+
+describe('project workflow live run inspection helpers', () => {
+  it('builds a project Start Full Run payload from only saved workflow input', async () => {
+    const { buildProjectWorkflowRunPayload } = await loadWorkflowRunUiHelper();
+
+    const payload = buildProjectWorkflowRunPayload(
+      { request: 'Ship the alpha', prompt: 'Ship the alpha' },
+      {
+        promptOverrides: { task: 'temporary override must not ship' },
+        outputs: { draft: [{ value: 'pretend output must not ship' }] },
+        sourceDraft: 'export default changedWorkflow',
+        structuredDrafts: { prompt: 'draft prompt template' },
+        runId: 'ui-selected-run',
+      },
+    );
+
+    expect(payload).toEqual({ input: { request: 'Ship the alpha', prompt: 'Ship the alpha' } });
+    expect(Object.keys(payload).sort()).toEqual(['input']);
+    expect(payload).not.toHaveProperty('promptOverrides');
+    expect(payload).not.toHaveProperty('outputs');
+    expect(payload).not.toHaveProperty('sourceDraft');
+    expect(payload).not.toHaveProperty('structuredDrafts');
+  });
+
+  it('polls the DB-backed Smithers inspection endpoint after project run launch and never fetches legacy run artifacts', async () => {
+    const { pollProjectRunInspection } = await loadWorkflowRunUiHelper();
+    const fetchedUrls: string[] = [];
+    const fetcher = async (input: string) => {
+      fetchedUrls.push(input);
+      if (input.includes('/runs/live-run/')) {
+        throw new Error(`legacy artifact fetch is forbidden in project mode: ${input}`);
+      }
+      return Response.json({ ok: true, detail: { run: { runId: 'live-run', status: 'finished' } } });
+    };
+
+    const result = await pollProjectRunInspection({
+      runId: 'live-run',
+      inspectionUrl: '/api/smithers/runs/live-run',
+      fetch: fetcher,
+      setTimeout: (callback) => callback(),
+    });
+
+    expect(result.finalStatus).toBe('finished');
+    expect(fetchedUrls).toContain('/api/smithers/runs/live-run?eventsAfterSeq=0&includeOutputs=true');
+    expect(fetchedUrls.some((url) => /\/runs\/live-run\/(plan\.json|run\.json|events\.jsonl)$/.test(url))).toBe(false);
+  });
+
+  it('retries initial 404s from detached-launch races in a bounded way', async () => {
+    const { pollProjectRunInspection } = await loadWorkflowRunUiHelper();
+    let calls = 0;
+    const result = await pollProjectRunInspection({
+      runId: 'eventual-run',
+      fetch: async () => {
+        calls += 1;
+        if (calls <= 2) {
+          return Response.json({ ok: false, code: 'SMITHERS_RUN_NOT_FOUND' }, { status: 404 });
+        }
+        return Response.json({ ok: true, detail: { run: { runId: 'eventual-run', status: 'running' } } });
+      },
+      setTimeout: (callback) => callback(),
+      maxNotFoundRetries: 2,
+      intervalMs: 1,
+    });
+
+    expect(calls).toBe(3);
+    expect(result.finalStatus).toBe('running');
+    expect(result.polls).toBe(3);
+  });
+
+  it('stops polling on terminal Smithers statuses including British and American cancellation spellings', async () => {
+    const { isTerminalSmithersRunStatus, pollProjectRunInspection } = await loadWorkflowRunUiHelper();
+    expect(['finished', 'failed', 'cancelled', 'canceled'].every((status) => isTerminalSmithersRunStatus(status))).toBe(true);
+    expect(isTerminalSmithersRunStatus('running')).toBe(false);
+
+    let calls = 0;
+    const result = await pollProjectRunInspection({
+      runId: 'failed-run',
+      fetch: async () => {
+        calls += 1;
+        return Response.json({ ok: true, detail: { run: { runId: 'failed-run', status: 'failed' } } });
+      },
+      setTimeout: (callback) => callback(),
+    });
+
+    expect(calls).toBe(1);
+    expect(result.finalStatus).toBe('failed');
+  });
+
+  it('keeps waitForRunToRender out of the project Start Full Run branch', () => {
+    const html = readFileSync('web/index.html', 'utf8');
+    const branchMatch = html.match(/if \(currentWorkflowId\) \{(?<body>[\s\S]*?)\n    \}\n\n    if \(!currentRunMeta/);
+    expect(branchMatch?.groups?.body ?? '').not.toContain('waitForRunToRender(');
   });
 });

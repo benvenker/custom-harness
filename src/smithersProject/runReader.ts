@@ -74,7 +74,7 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
       const [nodes, attempts, events, frames, lastEventSeq] = await Promise.all([
         handle.adapter.listNodes(runId),
         handle.adapter.listAttemptsForRun(runId),
-        handle.adapter.listEventHistory(runId, { afterSeq: -1, limit: eventLimit }),
+        handle.adapter.listEventHistory(runId, { afterSeq: options.eventsAfterSeq ?? -1, limit: eventLimit }),
         listFrameMetadata(handle, runId, frameLimit),
         handle.adapter.getLastEventSeq(runId),
       ]) as [NodeRow[], AttemptRow[], Array<Record<string, unknown>>, FrameRow[], number | undefined];
