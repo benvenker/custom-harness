@@ -810,6 +810,45 @@
     padding: 4px 0 4px 12px;
   }
   .field .val.prompt.harness { border-color: var(--harness); }
+  .model-select-combo {
+    position: relative;
+  }
+  .model-select-input {
+    width: 100%;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .model-select-menu {
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .model-select-menu[hidden] { display: none; }
+  .model-select-option {
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--hair-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.3;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+  .model-select-option:hover,
+  .model-select-option.active {
+    background: var(--ink);
+    color: var(--bone);
+  }
   .output-box {
     border: 1px solid var(--hair);
     background: var(--bone-2);
@@ -957,6 +996,90 @@
     stroke-width: 4px;
   }
 
+  .output-view-btn {
+    margin-top: 10px;
+    border: 1px solid var(--workflow);
+    background: transparent;
+    color: var(--workflow);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    cursor: pointer;
+  }
+  .output-view-btn:hover { background: var(--workflow); color: var(--bone); }
+  .output-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(17,17,16,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 44px;
+  }
+  .output-modal-backdrop[hidden] { display: none; }
+  .output-modal {
+    width: min(980px, 92vw);
+    max-height: 86vh;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    box-shadow: 8px 8px 0 var(--ink);
+    display: flex;
+    flex-direction: column;
+  }
+  .output-modal-head {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .output-modal-title { font-family: var(--serif); font-size: 22px; }
+  .output-modal-actions { display: flex; gap: 8px; }
+  .output-modal-body {
+    padding: 20px 24px;
+    overflow: auto;
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .output-markdown {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  .output-markdown pre {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bone-2);
+    border: 1px solid var(--hair);
+    padding: 12px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .output-raw {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    background: var(--bone-2);
+    border: 1px solid var(--hair);
+    padding: 12px;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .output-raw pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   ::selection { background: var(--workflow); color: var(--bone); }
 
   @media (max-width: 1100px) {
@@ -1001,6 +1124,7 @@
         <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
         <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
         <button class="btn ghost" id="runWorkflowBtn" disabled title="Start a full Smithers run from the selected workflow file">Start Full Run</button>
+        <button class="btn ghost" id="cancelWorkflowRunBtn" disabled title="Cancel the active Smithers project run">Stop Run</button>
         <button class="btn ghost" id="editSourceBtn" disabled title="Edit the selected .smithers/workflows/*.tsx file">Edit Source (.tsx)</button>
         <button class="btn ghost" id="resetBtn">Reset</button>
         <span class="run-action-status" id="runActionStatus"></span>
@@ -1072,6 +1196,22 @@
     </aside>
 
   </section>
+
+  <div class="output-modal-backdrop" id="outputModalBackdrop" hidden>
+    <div class="output-modal" role="dialog" aria-modal="true" aria-labelledby="outputModalTitle">
+      <div class="output-modal-head">
+        <div>
+          <div class="output-meta" id="outputModalMeta">Smithers output</div>
+          <div class="output-modal-title" id="outputModalTitle">Output</div>
+        </div>
+        <div class="output-modal-actions">
+          <button class="btn ghost" id="copyOutputBtn">Copy Markdown</button>
+          <button class="btn ghost" id="closeOutputBtn">Close</button>
+        </div>
+      </div>
+      <div class="output-modal-body" id="outputModalBody"></div>
+    </div>
+  </div>
 
   <footer>
     <div>custom-harness · prototype · 2026</div>
@@ -1299,9 +1439,16 @@
   const planBtn     = document.getElementById("planBtn");
   const rerunBtn    = document.getElementById("rerunBtn");
   const runWorkflowBtn = document.getElementById("runWorkflowBtn");
+  const cancelWorkflowRunBtn = document.getElementById("cancelWorkflowRunBtn");
   const editSourceBtn = document.getElementById("editSourceBtn");
   const resetBtn    = document.getElementById("resetBtn");
   const runActionStatus = document.getElementById("runActionStatus");
+  const outputModalBackdrop = document.getElementById("outputModalBackdrop");
+  const outputModalTitle = document.getElementById("outputModalTitle");
+  const outputModalMeta = document.getElementById("outputModalMeta");
+  const outputModalBody = document.getElementById("outputModalBody");
+  const copyOutputBtn = document.getElementById("copyOutputBtn");
+  const closeOutputBtn = document.getElementById("closeOutputBtn");
   const sampleBtns  = document.querySelectorAll(".sample-btn");
 
   let currentSample = "audit";
@@ -1314,6 +1461,7 @@
   let projectModeAvailable = false;
   const projectNodeOutputs = new Map();
   const projectNodeOutputTables = new Map();
+  let currentOutputMarkdown = "";
   // currentRunMeta is null for demos. Real runs populate it from run.json + plan.raw.
   let currentRunMeta = null;
   // Per-run drafts of edited Task prompts. Keyed by runId, then by nodeId.
@@ -1387,9 +1535,14 @@
               ${n.tools.map(t => `<span class="tool-chip ${n.status==='running'?'active':''}">${t}</span>`).join("")}
             </div>
           ` : ""}
+          ${outputRowForNode(n) ? `<button class="output-view-btn" data-output-node="${escapeHtml(n.id)}" type="button">View output</button>` : ""}
         </div>
         <div class="node-bar"><i></i></div>
       `;
+      el.querySelector(".output-view-btn")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openOutputViewer(n.id);
+      });
       el.addEventListener("click", () => selectNode(n.id));
       canvasInner.appendChild(el);
     });
@@ -1463,6 +1616,73 @@
         canvasSvg.appendChild(text);
       }
     });
+  }
+
+  function outputRowForNode(node) {
+    const detail = liveSmithersDetail();
+    if (!node || !detail || !Array.isArray(detail.outputs)) return null;
+    const smithersNodeId = node.smithers?.nodeId || node.id;
+    return detail.outputs.find(output => output.nodeId === smithersNodeId || output.nodeId === node.id) || null;
+  }
+
+  function selectedNodeGraph() {
+    return SAMPLES[currentSample]?.nodes?.find(node => node.id === selectedId) || null;
+  }
+
+  function markdownFromOutputRow(output) {
+    const row = output?.row;
+    if (!row || typeof row !== "object") return "";
+    for (const key of ["markdown", "text", "response", "result"]) {
+      if (typeof row[key] === "string") return row[key];
+    }
+    const parsed = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (["run_id", "node_id", "iteration"].includes(key)) continue;
+      parsed[key] = parseOutputValue(value);
+    }
+    const parts = [];
+    if (parsed.title) parts.push(`# ${parsed.title}`);
+    if (parsed.author) parts.push(`**Author:** ${parsed.author}`);
+    if (parsed.summary) parts.push(`## Summary\n\n${parsed.summary}`);
+    if (parsed.objective) parts.push(`## Objective\n\n${parsed.objective}`);
+    for (const [key, title] of [["constraints", "Constraints"], ["openQuestions", "Open Questions"], ["steps", "Steps"]]) {
+      if (Array.isArray(parsed[key])) {
+        parts.push(`## ${title}\n\n${parsed[key].map((item, index) => key === "steps" ? `${index + 1}. ${String(item).replace(/^\s*\d+[.)]\s+/, "")}` : `- ${item}`).join("\n")}`);
+      }
+    }
+    if (parsed.rationale) parts.push(`## Rationale\n\n${parsed.rationale}`);
+    if (parts.length) return parts.join("\n\n");
+    return JSON.stringify(parsed, null, 2);
+  }
+
+  function parseOutputValue(value) {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+      try { return JSON.parse(trimmed); } catch { return value; }
+    }
+    return value;
+  }
+
+  function renderMarkdownLite(markdown) {
+    return `<pre>${escapeHtml(markdown)}</pre>`;
+  }
+
+  function openOutputViewer(nodeId) {
+    const node = SAMPLES[currentSample]?.nodes?.find(item => item.id === nodeId);
+    const output = outputRowForNode(node);
+    if (!node || !output) return;
+    const markdown = markdownFromOutputRow(output);
+    currentOutputMarkdown = markdown;
+    outputModalTitle.textContent = `${node.title} output`;
+    outputModalMeta.textContent = `${output.outputTable} · ${output.nodeId} · iteration ${output.iteration}`;
+    outputModalBody.innerHTML = `<div class="output-markdown">${renderMarkdownLite(markdown)}</div><details class="output-raw"><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(output.row, null, 2))}</pre></details>`;
+    outputModalBackdrop.hidden = false;
+  }
+
+  function closeOutputViewer() {
+    outputModalBackdrop.hidden = true;
+    currentOutputMarkdown = "";
   }
 
   function selectNode(id) {
@@ -1641,11 +1861,14 @@
 
   function sourceValuesByPathForNode(node) {
     const studio = node?.smithers?.meta?.studio;
-    const promptField = studio?.fields?.prompt;
-    if (!promptField || !Array.isArray(promptField.sourcePath)) return {};
-    const key = promptField.sourcePath.join(".");
-    if (typeof promptField.value === "string") return { [key]: promptField.value };
-    return {};
+    if (!studio?.fields || typeof studio.fields !== "object") return {};
+    const values = {};
+    for (const field of Object.values(studio.fields)) {
+      if (!field || !Array.isArray(field.sourcePath)) continue;
+      const key = field.sourcePath.join(".");
+      if (typeof field.value === "string") values[key] = field.value;
+    }
+    return values;
   }
 
   function buildFallbackProjectInspectorState(node) {
@@ -1695,17 +1918,41 @@
     return state.structuredFields?.find(field => field.id === "prompt");
   }
 
+  let openRouterModelsPromise = null;
+  function loadOpenRouterModels() {
+    if (!openRouterModelsPromise) {
+      openRouterModelsPromise = fetch("/api/openrouter/models", { cache: "no-store" })
+        .then(response => response.json())
+        .then(data => data.ok === false ? [] : (data.models || []))
+        .catch(err => {
+          console.warn("openrouter models unavailable", err);
+          return [];
+        });
+    }
+    return openRouterModelsPromise;
+  }
+
   function renderProjectStructuredFields(state) {
-    const promptField = structuredPromptField(state);
-    if (!promptField) return "";
-    return `<div class="field">
-      <div class="lbl">
-        <span>${escapeHtml(promptField.label)}</span>
-        <span class="output-meta">${escapeHtml(promptField.destinationLabel)}</span>
-      </div>
-      <textarea class="val prompt-edit" id="structuredPromptArea" rows="7" spellcheck="false">${escapeHtml(promptField.value)}</textarea>
-      <div class="node-edit-note">Source-backed template value. Structured saving lands in the next slice; use Edit Source for canonical workflow changes.</div>
-    </div>`;
+    const fields = state.structuredFields || [];
+    if (fields.length === 0) return "";
+    return fields.map(field => {
+      const commonLabel = `<div class="lbl"><span>${escapeHtml(field.label)}</span><span class="output-meta">${escapeHtml(field.destinationLabel)}</span></div>`;
+      if (field.control === "select" || field.kind === "model-select") {
+        return `<div class="field">
+          ${commonLabel}
+          <div class="model-select-combo" data-current-value="${escapeHtml(field.value)}">
+            <input class="model-select-input structured-field" data-field-id="${escapeHtml(field.id)}" data-source-path="${escapeHtml(field.sourcePath.join("."))}" value="${escapeHtml(field.value)}" autocomplete="off" spellcheck="false" placeholder="Search OpenRouter models...">
+            <div class="model-select-menu" hidden></div>
+          </div>
+          <div class="node-edit-note">OpenRouter model for future Smithers runs. Saving writes this value back to workflow source.</div>
+        </div>`;
+      }
+      return `<div class="field">
+        ${commonLabel}
+        <textarea class="val prompt-edit structured-field" data-field-id="${escapeHtml(field.id)}" data-source-path="${escapeHtml(field.sourcePath.join("."))}" rows="7" spellcheck="false">${escapeHtml(field.value)}</textarea>
+        <div class="node-edit-note">Source-backed template value. Saving writes this value back to workflow source.</div>
+      </div>`;
+    }).join("");
   }
 
   function renderProjectInspectorBar(state) {
@@ -1714,8 +1961,80 @@
     const help = saveAction.help ? ` · ${escapeHtml(saveAction.help)}` : "";
     return `<div class="studio-bar">
       <span class="studio-status">Structured workflow edit${help}</span>
-      <button class="btn studio-run" id="saveStructuredBtn" disabled>${escapeHtml(saveAction.label)} <span class="arrow">→</span></button>
+      <button class="btn studio-run" id="saveStructuredBtn">${escapeHtml(saveAction.label)} <span class="arrow">→</span></button>
     </div>`;
+  }
+
+
+  function hydrateModelSelects() {
+    const combos = [...inspector.querySelectorAll('.model-select-combo')];
+    if (combos.length === 0) return;
+    loadOpenRouterModels().then(models => {
+      for (const combo of combos) setupModelCombo(combo, models);
+    });
+  }
+
+  function setupModelCombo(combo, models) {
+    const input = combo.querySelector('.model-select-input');
+    const menu = combo.querySelector('.model-select-menu');
+    if (!input || !menu) return;
+    const render = () => {
+      const query = input.value.trim().toLowerCase();
+      const matches = models
+        .filter(model => model?.id && (!query || `${model.id} ${model.name || ''}`.toLowerCase().includes(query)))
+        .slice(0, 80);
+      menu.innerHTML = matches.length
+        ? matches.map(model => `<div class="model-select-option" data-model-id="${escapeHtml(model.id)}">${escapeHtml(model.name ? `${model.id} · ${model.name}` : model.id)}</div>`).join('')
+        : '<div class="model-select-option">No matching OpenRouter models</div>';
+      menu.hidden = false;
+    };
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') menu.hidden = true;
+    });
+    menu.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('.model-select-option[data-model-id]');
+      if (!option) return;
+      event.preventDefault();
+      input.value = option.dataset.modelId;
+      menu.hidden = true;
+      saveStructuredWorkflowField(input, { refresh: true });
+    });
+    input.addEventListener('blur', () => setTimeout(() => { menu.hidden = true; }, 120));
+  }
+
+  async function saveStructuredWorkflowField(field, { refresh = true } = {}) {
+    if (!currentWorkflowId || !field?.dataset?.sourcePath) return null;
+    const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source-field`, {
+      sourcePath: field.dataset.sourcePath.split('.'),
+      value: field.value,
+    }, 'PUT');
+    if (result.value !== field.value) throw new Error(`Saved value mismatch for ${field.dataset.sourcePath}`);
+    if (refresh) {
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${field.value} · preview re-rendered`, 'ok');
+    }
+    return result;
+  }
+
+  async function saveStructuredWorkflowFields() {
+    if (!currentWorkflowId) return;
+    const fields = [...inspector.querySelectorAll('.structured-field[data-source-path]')];
+    if (fields.length === 0) return;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Saving ${fields.length} workflow field(s)...`);
+    try {
+      for (const field of fields) {
+        await saveStructuredWorkflowField(field, { refresh: false });
+      }
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${fields.length} workflow field(s) · preview re-rendered`, 'ok');
+    } catch (err) {
+      setRunActionStatus(`Structured save failed · ${err.message}`, 'error');
+    } finally {
+      setRunButtonsBusy(false);
+    }
   }
 
   function renderProjectPromptPreview(state, isHarness) {
@@ -1736,9 +2055,7 @@
   }
 
   function liveSmithersDetail() {
-    return currentRunMeta?.liveSmithers === true && currentRunMeta?.smithersRunDetail
-      ? currentRunMeta.smithersRunDetail
-      : null;
+    return currentRunMeta?.smithersRunDetail ?? null;
   }
 
   function latestSmithersNodeForGraphNode(node, detail) {
@@ -1812,6 +2129,7 @@
       </div>
       <div class="field">
         <div class="lbl"><span>Run output</span><span class="output-meta">Smithers output rows</span></div>
+        ${outputs.length > 0 ? `<button class="btn ghost" id="viewNodeOutputBtn">View full output</button>` : ""}
         ${outputHtml}
       </div>
       <div class="field">
@@ -2056,6 +2374,8 @@
     `;
 
     inspector.querySelector("#sourceLinkBtn")?.addEventListener("click", openWorkflowSourceEditor);
+    inspector.querySelector("#saveStructuredBtn")?.addEventListener("click", saveStructuredWorkflowFields);
+    hydrateModelSelects();
     inspector.querySelector("#initialWorkflowPromptArea")?.addEventListener("input", (event) => {
       goalInput.value = event.target.value;
       saveStoredProjectInput(currentWorkflowId, event.target.value);
@@ -2083,6 +2403,9 @@
       } catch (err) {
         setRunActionStatus(`Output must be JSON · ${err.message}`, "error");
       }
+    });
+    inspector.querySelector("#viewNodeOutputBtn")?.addEventListener("click", () => {
+      if (selectedId) openOutputViewer(selectedId);
     });
     inspector.querySelector("#clearNodeOutputBtn")?.addEventListener("click", async () => {
       if (currentRunMeta?.liveSmithers) {
@@ -2307,10 +2630,16 @@
     return Boolean(currentRunMeta?.isSmithersWorkflow || currentWorkflowId);
   }
 
+  function activeProjectRunIsCancellable() {
+    const status = projectRunInspection?.status || currentRunMeta?.smithersRunDetail?.run?.status || currentRunMeta?.status;
+    return Boolean(currentWorkflowId && projectRunInspection?.runId && status && !["finished", "failed", "cancelled", "canceled", "succeeded"].includes(String(status).toLowerCase()));
+  }
+
   function setRunButtonsBusy(isBusy) {
     planBtn.disabled = isBusy || projectModeAvailable;
     rerunBtn.disabled = isBusy || projectModeAvailable || !currentRunId;
     if (runWorkflowBtn) runWorkflowBtn.disabled = isBusy || !canRunWorkflow();
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = isBusy || !activeProjectRunIsCancellable();
     if (editSourceBtn) editSourceBtn.disabled = isBusy || !currentWorkflowId;
   }
 
@@ -2319,6 +2648,7 @@
     planBtn.disabled = projectModeAvailable;
     rerunBtn.disabled = projectModeAvailable || !currentRunId;
     if (runWorkflowBtn) runWorkflowBtn.disabled = !canRunWorkflow();
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
     if (editSourceBtn) editSourceBtn.disabled = !currentWorkflowId;
   }
 
@@ -2359,6 +2689,11 @@
       provBadge.textContent = "Smithers SQLite · live run";
       return;
     }
+    if (meta.smithersRunDetail) {
+      provBadge.classList.add("real");
+      provBadge.textContent = "Smithers SQLite · run";
+      return;
+    }
     if (meta.status === "failed" || meta.status === "error") {
       provBadge.classList.add("failed");
       provBadge.textContent = String(meta.status);
@@ -2392,11 +2727,28 @@
   }
 
   function statusGlyph(status) {
-    if (status === "succeeded") return "✓";
+    if (status === "succeeded" || status === "finished") return "✓";
     if (status === "running")   return "●";
     if (status === "failed")    return "✕";
+    if (status === "cancelled" || status === "canceled") return "⊘";
     if (status === "succeeded-with-unverified-change") return "△";
     return "·";
+  }
+
+  function runSortTime(run) {
+    if (typeof run?.createdAtMs === "number") return run.createdAtMs;
+    const parsed = Date.parse(run?.started || "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatRunTime(ms) {
+    if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "unknown time";
+    const date = new Date(ms);
+    const today = new Date();
+    const sameDay = date.toDateString() === today.toDateString();
+    return sameDay
+      ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   }
 
   function formatBytes(bytes) {
@@ -2412,24 +2764,65 @@
     }
     runsBar.classList.remove("empty");
     const placeholder = `<option value="" disabled${currentRunId ? "" : " selected"}>— select run —</option>`;
-    const options = runs.map(r => {
-      const path = r.path === "harness" ? "harness" : "workflow";
-      const goal = (r.goal || "").trim();
-      const goalShort = goal.length > 56 ? goal.slice(0, 56) + "…" : goal;
+    const sortedRuns = [...runs].sort((a, b) => runSortTime(b) - runSortTime(a));
+    const options = sortedRuns.map(r => {
+      const id = r.runId || r.id;
+      const path = r.workflowName ? "smithers" : r.path === "harness" ? "harness" : "workflow";
+      const goal = (r.goal || r.workflowName || "").trim();
+      const goalShort = goal.length > 36 ? goal.slice(0, 36) + "…" : goal;
       const st = r.status || "unknown";
-      const label = `${statusGlyph(st)} [${path}] ${goalShort || shortId(r.id)}`;
-      return `<option value="${escapeHtml(r.id)}" title="${escapeHtml(goal)}\n${escapeHtml(r.id)} · ${escapeHtml(st)}">${escapeHtml(label)}</option>`;
+      const time = formatRunTime(runSortTime(r));
+      const label = `${statusGlyph(st)} ${time} · ${st} · [${path}] ${goalShort || shortId(id)}`;
+      return `<option value="${escapeHtml(id)}" title="${escapeHtml(goal)}\n${escapeHtml(id)} · ${escapeHtml(st)} · ${escapeHtml(time)}">${escapeHtml(label)}</option>`;
     }).join("");
     runsSelect.innerHTML = placeholder + options;
     if (currentRunId) runsSelect.value = currentRunId;
   }
 
   async function refreshRuns(selectRunId) {
+    if (currentWorkflowId) return refreshProjectRuns(selectRunId);
     const runs = await loadRunsIndex();
     populateRunsBar(runs);
     renderForkChildren();
     if (selectRunId) await loadRun(selectRunId);
     return runs;
+  }
+
+  async function refreshProjectRuns(selectRunId) {
+    if (!currentWorkflowId) return [];
+    const data = await fetch(`/api/smithers/runs?workflowId=${encodeURIComponent(currentWorkflowId)}&limit=20`, { cache: "no-store" }).then(r => r.json());
+    const runs = data.ok === false ? [] : (data.runs || []);
+    populateRunsBar(runs);
+    if (selectRunId) await loadProjectRun(selectRunId);
+    return runs;
+  }
+
+  async function loadProjectRun(runId) {
+    const response = await fetch(`/api/smithers/runs/${encodeURIComponent(runId)}?includeOutputs=true&frameLimit=5&eventLimit=500`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Smithers run detail ${response.status}`);
+    const data = await response.json();
+    if (data.ok === false) throw new Error(data.error || data.code || "Smithers run detail failed");
+    const detail = data.detail || data;
+    currentRunMeta = {
+      ...(currentRunMeta || {}),
+      id: runId,
+      inspectionUrl: `/api/smithers/runs/${encodeURIComponent(runId)}`,
+      smithersRunDetail: detail,
+      liveSmithers: false,
+      isSmithersWorkflow: true,
+      workflowPath: workflowPathForCurrentProject(),
+    };
+    if (currentWorkflowGraph) {
+      const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+      const decision = deriveProjectRenderedGraph({ previewGraph: currentWorkflowGraph, liveMode: true, liveDetail: detail });
+      SAMPLES._project = decision.graph;
+      loadSample("_project");
+    }
+    setCurrentRunId(runId);
+    setProvenance(currentRunMeta);
+    setRunActionStatus(`Loaded Smithers run ${shortId(runId)} · ${detail.run?.status || "unknown"}`, runStatusKind(detail.run?.status));
+    if (runsSelect) runsSelect.value = runId;
+    return detail;
   }
 
   async function loadRun(runId, options = {}) {
@@ -2584,6 +2977,7 @@
       runIdEl.textContent = state.runId;
       setProvenance({ liveSmithers: true, status });
       setRunActionStatus(`Smithers SQLite · live run ${shortId(state.runId)} · ${status}`, runStatusKind(status));
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
       if (!isTerminalSmithersRunStatus(status)) {
         setTimeout(() => pollProjectRunInspectionOnce(seq), status === "running" ? 1500 : 3000);
       }
@@ -2647,6 +3041,27 @@
     }
   }
 
+  async function cancelProjectRun() {
+    if (!currentWorkflowId || !projectRunInspection?.runId) return;
+    const runId = projectRunInspection.runId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Stopping Smithers run ${shortId(runId)}...`);
+    try {
+      const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/runs/${encodeURIComponent(runId)}/cancel`, {});
+      projectRunInspection.status = result.status || "cancelled";
+      projectRunInspectionSeq += 1;
+      await refreshProjectRuns(runId);
+      if (currentRunMeta) currentRunMeta.liveSmithers = false;
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = true;
+      setProvenance({ liveSmithers: false, status: result.status || "cancelled" });
+      setRunActionStatus(`Stopped Smithers run ${shortId(runId)} · ${result.status || "cancelled"}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Stop failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
   async function runWorkflowFresh() {
     if (currentWorkflowId) {
       setRunButtonsBusy(true);
@@ -2678,6 +3093,7 @@
           currentWorkflowGraph.runStatus = result.status;
           await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: false });
         }
+        await refreshProjectRuns(result.runId);
         startProjectRunInspection({
           runId: result.runId,
           inspectionUrl: result.inspection?.url,
@@ -2859,9 +3275,9 @@
       planBtn.disabled = true;
       rerunBtn.disabled = true;
       if (runWorkflowBtn) runWorkflowBtn.disabled = false;
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
       if (editSourceBtn) editSourceBtn.disabled = false;
-      runsBar.classList.add("empty");
-      runsSelect.innerHTML = "";
+      await refreshProjectRuns();
       setRunActionStatus(`Loaded ${selected} from ${project.projectRoot}`, "ok");
       return true;
     } catch (err) {
@@ -2970,10 +3386,13 @@
   planBtn.addEventListener("click", startRunFromGoal);
   rerunBtn.addEventListener("click", rerunCurrentRun);
   runWorkflowBtn?.addEventListener("click", runWorkflowFresh);
+  cancelWorkflowRunBtn?.addEventListener("click", cancelProjectRun);
   editSourceBtn?.addEventListener("click", openWorkflowSourceEditor);
 
   runsSelect.addEventListener("change", () => {
-    if (runsSelect.value) loadRun(runsSelect.value);
+    if (!runsSelect.value) return;
+    if (currentWorkflowId) loadProjectRun(runsSelect.value).catch(err => setRunActionStatus(`Load failed · ${err.message}`, "error"));
+    else loadRun(runsSelect.value);
   });
 
   document.getElementById("forkLineage")?.addEventListener("click", (e) => {
@@ -2986,6 +3405,18 @@
   });
 
   resetBtn.addEventListener("click", () => loadSample(currentSample));
+  closeOutputBtn?.addEventListener("click", closeOutputViewer);
+  outputModalBackdrop?.addEventListener("click", (event) => {
+    if (event.target === outputModalBackdrop) closeOutputViewer();
+  });
+  copyOutputBtn?.addEventListener("click", async () => {
+    if (!currentOutputMarkdown) return;
+    await navigator.clipboard?.writeText(currentOutputMarkdown);
+    setRunActionStatus("Copied output markdown", "ok");
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !outputModalBackdrop?.hidden) closeOutputViewer();
+  });
 
   window.addEventListener("resize", () => {
     requestAnimationFrame(() => renderEdges(SAMPLES[currentSample]));

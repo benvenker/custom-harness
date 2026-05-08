@@ -102,6 +102,15 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
         return await startRun({ request, runsDir, runOutcome: runOutcomeFn });
       }
 
+      const workflowRunCancelMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/runs\/([^/]+)\/cancel$/);
+      if (request.method === 'POST' && workflowRunCancelMatch) {
+        return await workflowRunCancelResponse({
+          projectRoot,
+          workflowId: decodeURIComponent(workflowRunCancelMatch[1]),
+          runId: decodeURIComponent(workflowRunCancelMatch[2]),
+        });
+      }
+
       const workflowRunMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/run$/);
       if (request.method === 'POST' && workflowRunMatch) {
         return await workflowRunResponse({
@@ -110,6 +119,16 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
           defaultWorkflowId,
           workflowId: decodeURIComponent(workflowRunMatch[1]),
           runProjectWorkflow: runProjectWorkflowFn,
+        });
+      }
+
+
+      const workflowSourceFieldMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/source-field$/);
+      if (request.method === 'PUT' && workflowSourceFieldMatch) {
+        return await workflowSourceFieldResponse({
+          request,
+          projectRoot,
+          workflowId: decodeURIComponent(workflowSourceFieldMatch[1]),
         });
       }
 
@@ -134,6 +153,10 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
 
       if (url.pathname === '/api/workflows') {
         return json(workflowsResponse({ projectRoot, defaultWorkflowId }));
+      }
+
+      if (url.pathname === '/api/openrouter/models') {
+        return await openRouterModelsResponse();
       }
 
       if (url.pathname === '/api/smithers/runs') {
@@ -585,6 +608,158 @@ function applyProjectWorkflowInputNode(
   graph.defaultSelected = 'goal';
 }
 
+
+
+async function workflowSourceFieldResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  workflowId: string;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  const workflow = discoverProjectWorkflows(setup.projectRoot).find((candidate) => candidate.id === args.workflowId);
+  if (!workflow) return json({ ok: false, error: `Workflow not found: ${args.workflowId}` }, 404);
+  const body = await readJsonBody(args.request);
+  const sourcePath = body.sourcePath;
+  const value = body.value;
+  if (!Array.isArray(sourcePath) || sourcePath.length < 2 || !sourcePath.every((part) => typeof part === 'string' && /^[a-zA-Z0-9_-]+$/.test(part))) {
+    return json({ ok: false, error: 'sourcePath must be an array of safe string segments' }, 400);
+  }
+  if (typeof value !== 'string') return json({ ok: false, error: 'value must be a string' }, 400);
+
+  const source = readFileSync(workflow.path, 'utf8');
+  const nextSource = replaceEditableStringValue(source, sourcePath as string[], value);
+  if (readEditableStringValue(nextSource, sourcePath as string[]) !== value) {
+    throw new RequestValidationError(`Structured save did not update ${sourcePath.join('.')}`);
+  }
+  writeFileSync(workflow.path, nextSource);
+  return json({ ok: true, workflowId: workflow.id, workflowPath: workflow.path, sourcePath, value });
+}
+
+function readEditableStringValue(source: string, sourcePath: string[]) {
+  const parsed = parseEditableAgentModelPath(sourcePath);
+  const block = findEditableObjectBlock(source, 'agents');
+  const property = findObjectProperty(block, parsed.agentId);
+  const modelMatch = /model\s*:\s*(["'`])([\s\S]*?)(\1)/m.exec(property.value);
+  return modelMatch?.[2] ? unescapeQuotedString(modelMatch[2]) : null;
+}
+
+function replaceEditableStringValue(source: string, sourcePath: string[], value: string) {
+  const parsed = parseEditableAgentModelPath(sourcePath);
+  const agentsBlock = findEditableObjectBlock(source, 'agents');
+  const agentProperty = findObjectProperty(agentsBlock, parsed.agentId);
+  const modelMatch = /model\s*:\s*(["'`])([\s\S]*?)(\1)/m.exec(agentProperty.value);
+  if (!modelMatch || modelMatch.index === undefined) {
+    throw new RequestValidationError(`Could not find editable.agents.${parsed.agentId}.model in workflow source`);
+  }
+  const quote = modelMatch[1];
+  const modelValueStart = agentProperty.valueStart + modelMatch.index + modelMatch[0].indexOf(quote) + 1;
+  const modelValueEnd = modelValueStart + modelMatch[2].length;
+  return `${source.slice(0, modelValueStart)}${escapeForQuotedString(value, quote)}${source.slice(modelValueEnd)}`;
+}
+
+function parseEditableAgentModelPath(sourcePath: string[]) {
+  if (sourcePath.length !== 3 || sourcePath[0] !== 'agents') {
+    throw new RequestValidationError('Only editable.agents.<id>.model fields are supported for structured saves right now');
+  }
+  const [, agentId, fieldName] = sourcePath;
+  if (fieldName !== 'model') throw new RequestValidationError('Only agent model fields are supported for structured saves right now');
+  return { agentId };
+}
+
+function findEditableObjectBlock(source: string, propertyName: string) {
+  const editableIndex = source.indexOf('const editable');
+  if (editableIndex < 0) throw new RequestValidationError('Could not find editable object in workflow source');
+  const propertyMatch = new RegExp(`${escapeRegExp(propertyName)}\\s*:\\s*\\{`, 'm').exec(source.slice(editableIndex));
+  if (!propertyMatch || propertyMatch.index === undefined) throw new RequestValidationError(`Could not find editable.${propertyName} in workflow source`);
+  const openBrace = editableIndex + propertyMatch.index + propertyMatch[0].lastIndexOf('{');
+  const closeBrace = findMatchingBrace(source, openBrace);
+  return { source, start: openBrace, end: closeBrace, body: source.slice(openBrace + 1, closeBrace) };
+}
+
+function findObjectProperty(block: { source: string; start: number; end: number; body: string }, propertyName: string) {
+  const propertyMatch = new RegExp(`${escapeRegExp(propertyName)}\\s*:\\s*\\{`, 'm').exec(block.body);
+  if (!propertyMatch || propertyMatch.index === undefined) throw new RequestValidationError(`Could not find ${propertyName} in workflow source`);
+  const openBrace = block.start + 1 + propertyMatch.index + propertyMatch[0].lastIndexOf('{');
+  const closeBrace = findMatchingBrace(block.source, openBrace);
+  return {
+    valueStart: openBrace,
+    valueEnd: closeBrace + 1,
+    value: block.source.slice(openBrace, closeBrace + 1),
+  };
+}
+
+function findMatchingBrace(source: string, openBrace: number) {
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = openBrace; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  throw new RequestValidationError('Could not parse editable object braces in workflow source');
+}
+
+function unescapeQuotedString(value: string) {
+  return value.replace(/\\r/g, '\r').replace(/\\n/g, '\n').replace(/\\([\\"'`])/g, '$1');
+}
+
+function escapeForQuotedString(value: string, quote: string) {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(new RegExp(escapeRegExp(quote), 'g'), `\\${quote}`)
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function openRouterModelsResponse() {
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: { accept: 'application/json' },
+    });
+    if (!response.ok) {
+      return json({ ok: false, error: `OpenRouter /models returned ${response.status} ${response.statusText}` }, 502);
+    }
+    const data = await response.json();
+    const rows = Array.isArray((data as { data?: unknown }).data) ? (data as { data: unknown[] }).data : [];
+    const models = rows
+      .filter(isRecord)
+      .map((model) => ({
+        id: typeof model.id === 'string' ? model.id : '',
+        name: typeof model.name === 'string' ? model.name : undefined,
+        contextLength: typeof model.context_length === 'number' ? model.context_length : undefined,
+      }))
+      .filter((model) => model.id.length > 0)
+      .sort((a, b) => a.id.localeCompare(b.id));
+    return json({ ok: true, models });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return json({ ok: false, error: message }, 502);
+  }
+}
+
 async function workflowSourceResponse(args: {
   request: Request;
   projectRoot?: string;
@@ -605,6 +780,32 @@ async function workflowSourceResponse(args: {
   if (typeof body.source !== 'string') return json({ ok: false, error: 'source must be a string' }, 400);
   writeFileSync(workflow.path, body.source);
   return json({ ok: true, workflowId: workflow.id, workflowPath: workflow.path });
+}
+
+async function workflowRunCancelResponse(args: {
+  projectRoot?: string;
+  workflowId: string;
+  runId: string;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return json(setup);
+  const workflow = discoverProjectWorkflows(setup.projectRoot).find((candidate) => candidate.id === args.workflowId);
+  if (!workflow) return json({ ok: false, error: `Workflow not found: ${args.workflowId}` }, 404);
+  const proc = Bun.spawn(['bun', 'node_modules/.bin/smithers', 'cancel', args.runId, '--format', 'json'], {
+    cwd: setup.projectRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  const output = stdout.trim() ? parseJsonObject(stdout, 'smithers cancel response') : {};
+  if (exitCode !== 0 && (output.code !== 'RUN_NOT_ACTIVE')) {
+    return json({ ok: false, error: output.message ?? (stderr || stdout || `Smithers cancel failed with exit ${exitCode}`), ...output }, 500);
+  }
+  return json({ ok: true, runId: args.runId, status: output.status ?? 'cancelled', ...output });
 }
 
 async function workflowRunResponse(args: {
@@ -786,19 +987,43 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
 
 class RequestValidationError extends Error {}
 
-function staticFileResponse(rootDir: string, pathname: string) {
+async function staticFileResponse(rootDir: string, pathname: string) {
   const requested = pathname === '/' ? '/web/index.html' : pathname;
   const localPath = safeStaticPath(rootDir, requested);
-  if (!existsSync(localPath)) return new Response('Not found\n', { status: 404 });
+  if (!existsSync(localPath)) {
+    if (localPath.endsWith('.js')) {
+      const tsPath = `${localPath.slice(0, -'.js'.length)}.ts`;
+      if (existsSync(tsPath)) {
+        const output = await Bun.build({
+          entrypoints: [tsPath],
+          target: 'browser',
+          format: 'esm',
+          minify: false,
+          sourcemap: 'none',
+        });
+        if (!output.success) {
+          return new Response(output.logs.map((log) => log.message).join('\n') || 'Build failed\n', { status: 500 });
+        }
+        return new Response(output.outputs[0], {
+          headers: staticHeaders('text/javascript; charset=utf-8'),
+        });
+      }
+    }
+    return new Response('Not found\n', { status: 404 });
+  }
   const file = Bun.file(localPath);
   return new Response(file, {
-    headers: {
-      'content-type': contentType(localPath),
-      'cache-control': 'no-store, no-cache, must-revalidate',
-      pragma: 'no-cache',
-      expires: '0',
-    },
+    headers: staticHeaders(contentType(localPath)),
   });
+}
+
+function staticHeaders(contentTypeValue: string) {
+  return {
+    'content-type': contentTypeValue,
+    'cache-control': 'no-store, no-cache, must-revalidate',
+    pragma: 'no-cache',
+    expires: '0',
+  };
 }
 
 function safeStaticPath(rootDir: string, pathname: string) {

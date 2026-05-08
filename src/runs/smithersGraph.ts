@@ -392,7 +392,9 @@ function describeAgent(descriptor?: TaskDescriptor) {
   const agent = descriptor?.agent;
   if (Array.isArray(agent)) return `smithers · ${agent.length} agents`;
   if (agent && typeof agent === 'object') {
-    const id = (agent as { id?: unknown; model?: unknown }).id ?? (agent as { model?: unknown }).model;
+    const model = (agent as { model?: unknown }).model;
+    const id = (agent as { id?: unknown }).id;
+    if (typeof model === 'string' && model) return `smithers · ${model}`;
     if (typeof id === 'string' && id) return `smithers · ${id}`;
   }
   return 'smithers · task agent';

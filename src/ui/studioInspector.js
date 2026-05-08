@@ -15,8 +15,8 @@ export function buildStudioInspectorState(options) {
         id: 'save-to-workflow',
         label: 'Save to workflow',
         visible: true,
-        enabled: false,
-        help: 'coming in the next slice',
+        enabled: true,
+        help: 'writes source-backed fields into workflow source',
       }]
       : []),
     ...(canEditSource ? [{ id: 'edit-source', label: 'Edit source', visible: true, enabled: true }] : []),
@@ -36,20 +36,21 @@ function structuredFieldsForNode(options) {
   const studio = studioMetadata(options.node);
   if (!isRecord(studio) || studio.editable !== true || !isRecord(studio.fields)) return [];
 
-  const promptField = studio.fields.prompt;
-  if (!isSupportedPromptField(promptField)) return [];
-
-  const sourcePath = [...promptField.sourcePath];
-  const sourcePathKey = sourcePath.join('.');
-  return [{
-    id: 'prompt',
-    label: hasText(promptField.label) ? promptField.label : 'Prompt template',
-    kind: promptField.kind,
-    control: 'textarea',
-    value: options.sourceValuesByPath?.[sourcePathKey] ?? promptField.value ?? '',
-    sourcePath,
-    destinationLabel: options.workflowPath ? `${options.workflowPath} · ${sourcePathKey}` : sourcePathKey,
-  }];
+  return Object.entries(studio.fields)
+    .filter((entry) => isSupportedStudioField(entry[1]))
+    .map(([id, field]) => {
+      const sourcePath = [...field.sourcePath];
+      const sourcePathKey = sourcePath.join('.');
+      return {
+        id,
+        label: hasText(field.label) ? field.label : defaultFieldLabel(id, field.kind),
+        kind: field.kind,
+        control: field.kind === 'model-select' ? 'select' : 'textarea',
+        value: options.sourceValuesByPath?.[sourcePathKey] ?? field.value ?? '',
+        sourcePath,
+        destinationLabel: options.workflowPath ? `${options.workflowPath} · ${sourcePathKey}` : sourcePathKey,
+      };
+    });
 }
 
 function studioMetadata(node) {
@@ -59,14 +60,20 @@ function studioMetadata(node) {
   return meta.studio;
 }
 
-function isSupportedPromptField(value) {
+function isSupportedStudioField(value) {
   return isRecord(value)
-    && value.kind === 'multiline-text'
+    && (value.kind === 'multiline-text' || value.kind === 'model-select')
     && Array.isArray(value.sourcePath)
     && value.sourcePath.length > 0
     && value.sourcePath.every(hasText)
     && (value.label === undefined || typeof value.label === 'string')
     && (value.value === undefined || typeof value.value === 'string');
+}
+
+function defaultFieldLabel(id, kind) {
+  if (kind === 'model-select') return 'Model';
+  if (id === 'prompt') return 'Prompt template';
+  return id;
 }
 
 function visibleCopyForState(args) {
