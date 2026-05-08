@@ -10,3 +10,6 @@ web/*
 *.db-shm
 *.db-wal
 smithers.db*
+
+# bv (beads viewer) local config and caches
+.bv/
