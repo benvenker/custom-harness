@@ -28,7 +28,6 @@ type RunProjectWorkflowFn = (options: {
   workflowId: string;
   workflowPath: string;
   input: Record<string, unknown>;
-  promptOverrides?: Record<string, string>;
 }) => Promise<{ runId: string; status: string }>;
 
 type CreateSmithersRunReaderFn = (options: { projectRoot: string }) => SmithersRunReader | Promise<SmithersRunReader>;
@@ -622,15 +621,26 @@ async function workflowRunResponse(args: {
   const input = body.input === undefined ? {} : body.input;
   if (!isRecord(input)) return json({ ok: false, error: 'input must be a JSON object' }, 400);
   const promptOverrides = parsePromptOverrides(body.promptOverrides);
+  if (promptOverrides !== undefined) {
+    return json({
+      ok: false,
+      code: 'PROJECT_MODE_PROMPT_OVERRIDES_UNSUPPORTED',
+      error: 'Project-mode runs use saved Smithers workflow source and do not support promptOverrides.',
+    }, 400);
+  }
 
   const result = await args.runProjectWorkflow({
     projectRoot: setup.projectRoot,
     workflowId: workflow.id,
     workflowPath: workflow.path,
     input,
-    ...(promptOverrides === undefined ? {} : { promptOverrides }),
   });
-  return json({ ok: true, runId: result.runId, status: result.status }, 202);
+  return json({
+    ok: true,
+    runId: result.runId,
+    status: result.status,
+    inspection: { url: `/api/smithers/runs/${result.runId}` },
+  }, 202);
 }
 
 async function renderProjectWorkflowGraph(options: {
@@ -665,19 +675,7 @@ async function runProjectWorkflow(options: {
   workflowId: string;
   workflowPath: string;
   input: Record<string, unknown>;
-  promptOverrides?: Record<string, string>;
 }): Promise<{ runId: string; status: string }> {
-  if (options.promptOverrides && Object.keys(options.promptOverrides).length > 0) {
-    const result = await runSmithersWorkflow({
-      workflowPath: options.workflowPath,
-      input: options.input,
-      runId: crypto.randomUUID(),
-      promptOverrides: options.promptOverrides,
-    });
-    return { runId: result.runId, status: result.status };
-  }
-
-  mkdirSync(join(options.projectRoot, '.smithers', 'executions'), { recursive: true });
   const proc = Bun.spawn([
     'bun',
     'node_modules/.bin/smithers',
@@ -691,8 +689,6 @@ async function runProjectWorkflow(options: {
     'json',
     '--root',
     '.',
-    '--log-dir',
-    '.smithers/executions',
   ], {
     cwd: options.projectRoot,
     stdout: 'pipe',

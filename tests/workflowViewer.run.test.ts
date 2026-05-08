@@ -15,10 +15,10 @@ function writeWorkflow(projectRoot: string, id: string) {
 }
 
 describe('project workflow run API', () => {
-  it('launches the selected workflow through the runner seam and returns Smithers run status', async () => {
+  it('launches the selected workflow through the runner seam and returns Smithers run status plus inspection URL', async () => {
     const projectRoot = tempProject('custom-harness-workflow-run-');
     writeWorkflow(projectRoot, 'foo');
-    const calls: Array<{ projectRoot: string; workflowId: string; workflowPath: string; input: Record<string, unknown> }> = [];
+    const calls: Array<Record<string, unknown>> = [];
     const handler = createHarnessServerHandler({
       rootDir: process.cwd(),
       projectRoot,
@@ -36,15 +36,62 @@ describe('project workflow run API', () => {
     }));
 
     expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({ ok: true, runId: 'run_test_123', status: 'detached' });
-    expect(calls).toEqual([{
+    expect(await response.json()).toEqual({
+      ok: true,
+      runId: 'run_test_123',
+      status: 'detached',
+      inspection: { url: '/api/smithers/runs/run_test_123' },
+    });
+    expect(calls).toHaveLength(1);
+    expect(Object.keys(calls[0]!).sort()).toEqual(['input', 'projectRoot', 'workflowId', 'workflowPath']);
+    expect(Object.hasOwn(calls[0]!, 'promptOverrides')).toBe(false);
+    expect(calls[0]).toEqual({
       projectRoot: resolve(projectRoot),
       workflowId: 'foo',
       workflowPath: join(resolve(projectRoot), '.smithers', 'workflows', 'foo.tsx'),
       input: { prompt: 'Ship the alpha' },
-    }]);
+    });
     expect(existsSync(join(projectRoot, 'runs'))).toBe(false);
     expect(existsSync(join(projectRoot, '.poolside'))).toBe(false);
+  });
+
+  it('rejects project-mode prompt overrides before invoking project or legacy runners', async () => {
+    const projectRoot = tempProject('custom-harness-workflow-run-overrides-');
+    writeWorkflow(projectRoot, 'foo');
+    let projectRunCalls = 0;
+    let legacyRunCalls = 0;
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot,
+      workflowId: 'foo',
+      runProjectWorkflow: async () => {
+        projectRunCalls += 1;
+        return { runId: 'should-not-run', status: 'detached' };
+      },
+      runSmithersWorkflow: async () => {
+        legacyRunCalls += 1;
+        return { runId: 'legacy-should-not-run', status: 'running' } as never;
+      },
+    });
+
+    const response = await handler(new Request('http://localhost/api/workflows/foo/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        input: { prompt: 'Ship the alpha' },
+        promptOverrides: { 'do-safe-thing': 'Use a different prompt' },
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'PROJECT_MODE_PROMPT_OVERRIDES_UNSUPPORTED',
+      error: 'Project-mode runs use saved Smithers workflow source and do not support promptOverrides.',
+    });
+    expect(projectRunCalls).toBe(0);
+    expect(legacyRunCalls).toBe(0);
+    expect(existsSync(join(projectRoot, 'runs'))).toBe(false);
   });
 
   it('rejects unknown workflow IDs before invoking the runner', async () => {

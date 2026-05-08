@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHarnessServerHandler } from '../src/server.js';
@@ -12,6 +12,7 @@ function writeSafeProject() {
   const projectRoot = tempProject('custom-harness-real-run-');
   const workflowsDir = join(projectRoot, '.smithers', 'workflows');
   mkdirSync(workflowsDir, { recursive: true });
+  symlinkSync(join(process.cwd(), 'node_modules'), join(projectRoot, 'node_modules'), 'dir');
   symlinkSync(join(process.cwd(), 'node_modules'), join(projectRoot, '.smithers', 'node_modules'), 'dir');
   writeFileSync(join(projectRoot, '.smithers', 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
   writeFileSync(join(workflowsDir, 'foo.tsx'), `
@@ -32,7 +33,7 @@ export default smithers(() => React.createElement(
 }
 
 describe('project workflow real run integration', () => {
-  it('launches a real Smithers run and returns the Smithers run id/status', async () => {
+  it('launches a real Smithers run and returns the Smithers run id/status with an inspection URL', async () => {
     const projectRoot = writeSafeProject();
     const handler = createHarnessServerHandler({ rootDir: process.cwd(), projectRoot, workflowId: 'foo' });
 
@@ -43,20 +44,19 @@ describe('project workflow real run integration', () => {
     }));
 
     expect(response.status).toBe(202);
-    const body = await response.json() as { ok: boolean; runId: string; status: string };
+    const body = await response.json() as {
+      ok: boolean;
+      runId: string;
+      status: string;
+      inspection?: { url?: string };
+    };
     expect(body.ok).toBe(true);
     expect(body.runId).toMatch(/^run[-_]/);
     expect(body.status).toBeTruthy();
+    expect(body.inspection).toEqual({ url: `/api/smithers/runs/${body.runId}` });
     expect(existsSync(join(projectRoot, 'runs'))).toBe(false);
 
-    const executionsDir = join(projectRoot, '.smithers', 'executions');
-    await waitFor(() => readdirSync(executionsDir).some((entry) => entry.includes(body.runId)));
-    expect(readdirSync(executionsDir).some((entry) => entry.includes(body.runId))).toBe(true);
-    const logFile = join(executionsDir, `${body.runId}.log`);
-    if (existsSync(logFile)) {
-      await waitFor(() => readFileSync(logFile, 'utf8').includes(body.runId));
-      expect(readFileSync(logFile, 'utf8')).toContain(body.runId);
-    }
+    await waitFor(() => existsSync(join(projectRoot, 'smithers.db')));
   });
 });
 
