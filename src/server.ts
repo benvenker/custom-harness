@@ -6,6 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
+import { listDrafts, getDraft, updateDraft } from "./drafts.js";
 import type { GraphSnapshot } from "@smithers-orchestrator/graph";
 import {
   runOutcome,
@@ -178,6 +179,22 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
           workflowId: decodeURIComponent(workflowSourceMatch[1]),
           write: true,
         });
+      }
+
+      // Draft workflow endpoints
+      if (url.pathname === "/api/drafts" && request.method === "GET") {
+        return draftsListResponse({ runsDir });
+      }
+
+      const draftMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)$/);
+      if (draftMatch) {
+        const draftId = decodeURIComponent(draftMatch[1]);
+        if (request.method === "GET") {
+          return draftGetResponse({ runsDir, id: draftId });
+        }
+        if (request.method === "PUT") {
+          return draftUpdateResponse({ request, runsDir, id: draftId });
+        }
       }
 
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -546,10 +563,10 @@ async function smithersRunsListResponse(args: {
   defaultWorkflowId?: string;
   createSmithersRunReader: CreateSmithersRunReaderFn;
 }) {
-  const setup = projectSetup(args);
-  if (!setup.ok) return json(setup);
+  const projectRoot = requireProjectRoot(args.projectRoot);
+  if (!projectRoot.ok) return json(projectRoot);
   return await withSmithersRunReader(
-    setup.projectRoot,
+    projectRoot.projectRoot,
     args.createSmithersRunReader,
     async (reader) => {
       const url = new URL(args.request.url);
@@ -574,10 +591,10 @@ async function smithersRunDetailResponse(args: {
   runId: string;
   createSmithersRunReader: CreateSmithersRunReaderFn;
 }) {
-  const setup = projectSetup(args);
-  if (!setup.ok) return json(setup);
+  const projectRoot = requireProjectRoot(args.projectRoot);
+  if (!projectRoot.ok) return json(projectRoot);
   return await withSmithersRunReader(
-    setup.projectRoot,
+    projectRoot.projectRoot,
     args.createSmithersRunReader,
     async (reader) => {
       const url = new URL(args.request.url);
@@ -625,10 +642,10 @@ async function smithersRunEventsResponse(args: {
   runId: string;
   createSmithersRunReader: CreateSmithersRunReaderFn;
 }) {
-  const setup = projectSetup(args);
-  if (!setup.ok) return json(setup);
+  const projectRoot = requireProjectRoot(args.projectRoot);
+  if (!projectRoot.ok) return json(projectRoot);
   return await withSmithersRunReader(
-    setup.projectRoot,
+    projectRoot.projectRoot,
     args.createSmithersRunReader,
     async (reader) => {
       const url = new URL(args.request.url);
@@ -666,6 +683,17 @@ async function withSmithersRunReader(
   } finally {
     reader.close();
   }
+}
+
+function requireProjectRoot(projectRoot?: string) {
+  if (!projectRoot) {
+    return {
+      ok: false as const,
+      status: "setup-needed",
+      error: "Missing --project for project workflow viewer",
+    };
+  }
+  return { ok: true as const, projectRoot: resolve(projectRoot) };
 }
 
 function projectSetup(args: {
@@ -1244,6 +1272,40 @@ async function withCwd<T>(cwd: string, fn: () => Promise<T>): Promise<T> {
   } finally {
     process.chdir(previous);
   }
+}
+
+function draftsListResponse(args: { runsDir: string }) {
+  const drafts = listDrafts(args.runsDir);
+  return json({ ok: true, drafts });
+}
+
+function draftGetResponse(args: { runsDir: string; id: string }) {
+  const draft = getDraft(args.runsDir, args.id);
+  if (!draft)
+    return json({ ok: false, error: `Draft not found: ${args.id}` }, 404);
+  return json({ ok: true, draft });
+}
+
+async function draftUpdateResponse(args: {
+  request: Request;
+  runsDir: string;
+  id: string;
+}) {
+  const body = await readJsonBody(args.request);
+  const allowedKeys = new Set([
+    "name",
+    "description",
+    "root",
+    "goal",
+    "context",
+  ]);
+  const updates = Object.fromEntries(
+    Object.entries(body).filter(([k]) => allowedKeys.has(k))
+  );
+  const updated = updateDraft(args.runsDir, args.id, updates);
+  if (!updated)
+    return json({ ok: false, error: `Draft not found: ${args.id}` }, 404);
+  return json({ ok: true, draft: updated });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
