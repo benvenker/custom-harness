@@ -1,6 +1,5 @@
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { copyFileSync, existsSync, unlinkSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export type SmithersWorkflowLike = {
@@ -33,22 +32,17 @@ export async function loadWorkflow(workflowPath: string): Promise<SmithersWorkfl
 }
 
 async function importFreshWorkflow(workflowPath: string): Promise<Record<string, unknown>> {
-  const outdir = mkdtempSync(join(tmpdir(), 'custom-harness-workflow-'));
-  const result = await Bun.build({
-    entrypoints: [workflowPath],
-    outdir,
-    naming: 'workflow-[hash].mjs',
-    target: 'bun',
-    format: 'esm',
-    external: ['smithers-orchestrator'],
-  });
-  if (!result.success) {
-    const message = result.logs.map((log) => log.message).join('\n') || `Could not compile workflow: ${workflowPath}`;
-    throw new Error(message);
+  const tempPath = join(dirname(workflowPath), `.custom-harness-${Date.now()}-${crypto.randomUUID()}-${basename(workflowPath)}`);
+  copyFileSync(workflowPath, tempPath);
+  try {
+    return await import(pathToFileURL(tempPath).href);
+  } finally {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // Best-effort cleanup only; hidden temp workflow files are ignored by discovery.
+    }
   }
-  const outfile = result.outputs[0]?.path;
-  if (!outfile) throw new Error(`Could not compile workflow: ${workflowPath}`);
-  return await import(`${pathToFileURL(outfile).href}?t=${Date.now()}-${Math.random()}`);
 }
 
 export async function loadSmithersRuntime(workflowPath: string): Promise<SmithersRuntime> {
