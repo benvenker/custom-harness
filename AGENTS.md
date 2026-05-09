@@ -17,6 +17,42 @@ You are an autonomous agent running inside a custom execution harness. Your job 
 3. If a command fails, diagnose the error and fix it — don't retry blindly.
 4. When done, call `done` with a clear summary of what was accomplished and any relevant output.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked locally with Beads (`br`) in `.beads/`; `.scratch/` may be used for PRDs/spec files. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage roles map to default label strings, applied as Beads/local-markdown labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: read root `CONTEXT.md`, root `docs/adr/`, and Smithers integration docs for Smithers-related work. See `docs/agents/domain.md`.
+
+### Pi coordination
+
+Use pi-messenger, pi-intercom, and pi-review-loop for multi-agent coordination and review workflows. See `docs/agents/pi-coordination.md`.
+
+<pi-intercom>
+Coordinate with other local pi sessions on related codebases. Use `/skill:pi-intercom` for detailed patterns.
+
+**When:** Same codebase parallel work, reference codebase scouting, related repos, blocking planner/worker decisions.
+
+**Not when:** Unrelated codebases, trivial questions, or when you can proceed independently from the docs/code.
+
+**Principle:** Prefer `send` for notifications; `ask` only when blocked waiting for input.
+</pi-intercom>
+
+<pi-messenger>
+Use pi-messenger for same-repo multi-agent coordination: join the mesh for parallel work, reserve files before editing, check the activity feed, and release reservations when done. Use Crew only when multi-agent task orchestration is explicitly useful; Beads remains the primary durable issue tracker.
+</pi-messenger>
+
+<pi-review-loop>
+Use pi-review-loop for plan review before implementation and code review before declaring work done. Prefer fresh-context review for non-trivial plans or code changes, then still run the relevant validation commands.
+</pi-review-loop>
+
 ## Constraints
 
 - Prefer targeted, minimal changes over broad rewrites.
@@ -30,6 +66,7 @@ CustomHarness is a Smithers-first prototype. Do not build a parallel workflow ru
 Critical docs to read before changing project workflow rendering, execution, editing, or run inspection:
 
 - `CONTEXT.md`
+- `docs/smithers-integration-context.md` (points to the downloaded Smithers reference: `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt`)
 - `docs/adr/0001-runs-in-smithers-canonical-location.md`
 - `docs/adr/0003-reflect-smithers-first-smooth-with-overlays.md`
 - `docs/adr/0004-project-mode-run-inspection-reads-smithers-sqlite.md`

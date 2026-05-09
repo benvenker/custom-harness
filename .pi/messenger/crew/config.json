@@ -1,0 +1,19 @@
+{
+  "concurrency": {
+    "workers": 2,
+    "max": 4
+  },
+  "dependencies": "strict",
+  "coordination": "moderate",
+  "review": {
+    "enabled": true,
+    "maxIterations": 3
+  },
+  "planning": {
+    "maxPasses": 1
+  },
+  "work": {
+    "maxAttemptsPerTask": 3,
+    "maxWaves": 20
+  }
+}
