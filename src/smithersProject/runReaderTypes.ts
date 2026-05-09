@@ -138,6 +138,26 @@ export type SmithersRunEventsResult = {
   parseWarnings?: SmithersParseWarning[];
 };
 
+export type SmithersRunGraphSource =
+  | {
+      kind: "smithers-frame";
+      runId: string;
+      frameNo: number;
+      fallback: false;
+    }
+  | {
+      kind: "unavailable";
+      runId: string;
+      frameNo?: number;
+      fallback: false;
+      reason: string;
+    };
+
+export type SmithersRunDetailView = {
+  graph?: import("../runs/smithersGraph.js").RenderGraph;
+  graphSource: SmithersRunGraphSource;
+};
+
 export type SmithersRunDetail = {
   run: SmithersRunSummary;
   nodes: SmithersRunNode[];
@@ -147,6 +167,7 @@ export type SmithersRunDetail = {
   outputs: SmithersRunOutput[];
   cursors: SmithersRunCursors;
   parseWarnings: SmithersParseWarning[];
+  view?: SmithersRunDetailView;
 };
 
 export type ListRunsOptions = {
