@@ -2853,6 +2853,13 @@
     return runs;
   }
 
+  function enterCurrentWorkflowSourcePreview() {
+    stopProjectRunInspection();
+    currentRunMeta = null;
+    setCurrentRunId(null);
+    if (runsSelect) runsSelect.value = "";
+  }
+
   async function loadProjectRun(runId) {
     stopProjectRunInspection();
     const response = await fetch(`/api/smithers/runs/${encodeURIComponent(runId)}?includeOutputs=true&frameLimit=5&eventLimit=500`, { cache: "no-store" });
@@ -3404,6 +3411,7 @@
 
   async function refreshProjectGraphFromInput() {
     if (!currentWorkflowId) return;
+    enterCurrentWorkflowSourcePreview();
     try {
       const graphResponse = await fetch(projectGraphUrl(currentWorkflowId), { cache: "no-store" }).then(r => r.json());
       if (graphResponse.ok === false) throw new Error(graphResponse.error || "graph render failed");
@@ -3411,10 +3419,10 @@
       rememberProjectOutputTables(graphResponse.graph);
       await renderProjectGraphForCurrentState({
         previewGraph: graphResponse.graph,
-        liveMode: Boolean(currentRunMeta?.liveSmithers && currentRunMeta?.smithersRunDetail),
-        liveDetail: currentRunMeta?.smithersRunDetail,
+        liveMode: false,
+        liveDetail: null,
       });
-      if (!currentRunMeta?.liveSmithers) setProvenance({ status: "preview", notes: "Current Workflow Source preview" });
+      setProvenance({ status: "preview", notes: "Current Workflow Source preview" });
       setRunActionStatus(`Preview updated for ${currentWorkflowId}`, "ok");
     } catch (err) {
       setRunActionStatus(`Preview failed · ${err.message}`, "error");

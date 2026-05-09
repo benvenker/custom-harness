@@ -790,6 +790,25 @@ describe("project workflow live run inspection helpers", () => {
     expect(html).toContain("Current Workflow Source preview");
     expect(html).toContain('meta.status === "preview" || meta.status === "project"');
   });
+
+  it("switches back to current preview before re-rendering source edits instead of mixing with selected runs", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const refreshBody = html.match(
+      /async function refreshProjectGraphFromInput\(\) \{(?<body>[\s\S]*?)\n  let projectInputRefreshTimer/
+    )?.groups?.body ?? "";
+    expect(refreshBody).toContain("enterCurrentWorkflowSourcePreview();");
+    expect(refreshBody).toContain("liveMode: false");
+    expect(refreshBody).toContain("liveDetail: null");
+    expect(refreshBody).not.toContain("currentRunMeta?.smithersRunDetail");
+
+    const previewSwitch = html.match(
+      /function enterCurrentWorkflowSourcePreview\(\) \{(?<body>[\s\S]*?)\n\n  async function loadProjectRun/
+    )?.groups?.body ?? "";
+    expect(previewSwitch).toContain("stopProjectRunInspection();");
+    expect(previewSwitch).toContain("currentRunMeta = null;");
+    expect(previewSwitch).toContain("setCurrentRunId(null);");
+    expect(previewSwitch).toContain('runsSelect.value = ""');
+  });
 });
 
 describe("project workflow live render state helpers", () => {
