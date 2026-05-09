@@ -908,6 +908,62 @@ describe("project workflow live render state helpers", () => {
     expect(decision.visibleCopy).toContain("raw status: finished");
   });
 
+  it("normalizes active node statuses when the live run has reached a terminal status", async () => {
+    const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+    const preview = previewGraphForOverlay([
+      previewTaskNode({
+        id: "ui-task",
+        status: "running",
+        smithers: { nodeId: "smithers-task" },
+      }),
+    ]);
+    const detail = smithersRunDetailFixture({
+      run: {
+        runId: "live-run",
+        status: "cancelled",
+        workflowName: "foo",
+        workflowPath: ".smithers/workflows/foo.tsx",
+      },
+      nodes: [
+        {
+          runId: "live-run",
+          nodeId: "smithers-task",
+          iteration: 0,
+          state: "in-progress",
+          status: "in-progress",
+          outputTable: "task_output",
+          label: "Smithers Task",
+        },
+      ],
+      attempts: [
+        {
+          runId: "live-run",
+          nodeId: "smithers-task",
+          iteration: 0,
+          attempt: 1,
+          state: "in-progress",
+          status: "in-progress",
+          error: null,
+          responseText: null,
+          startedAtMs: 10,
+          finishedAtMs: null,
+        },
+      ],
+    });
+
+    const decision = deriveProjectRenderedGraph({
+      previewGraph: preview,
+      liveMode: true,
+      liveDetail: detail,
+    });
+
+    expect(decision.mode).toBe("live");
+    expect(decision.provenance.status).toBe("cancelled");
+    expect(decision.graph?.nodes.find((node) => node.id === "ui-task")?.status).toBe("failed");
+    expect(decision.visibleCopy).toContain("raw status: cancelled");
+    expect(decision.visibleCopy).not.toContain("raw status: in-progress");
+  });
+
   it("does not return a raw preview graph under live Smithers provenance when overlaying fails", async () => {
     const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
     const rawPreview = previewGraphForOverlay([

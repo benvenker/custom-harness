@@ -73,8 +73,9 @@ export function deriveProjectRenderedGraph(options: {
 
   const overlayBuilder = options.overlayBuilder ?? buildSmithersRunOverlayState;
   try {
-    const overlay = overlayBuilder({ graph: options.previewGraph, detail: options.liveDetail });
-    const status = String(options.liveDetail.run?.status ?? 'unknown');
+    const liveDetail = normalizeLiveDetailStatus(options.liveDetail);
+    const overlay = overlayBuilder({ graph: options.previewGraph, detail: liveDetail });
+    const status = String(liveDetail.run?.status ?? 'unknown');
     return {
       mode: 'live',
       graph: overlay.graph,
@@ -244,6 +245,29 @@ function unavailableHistoricalGraph(args: {
       note: 'historical graph unavailable; no current-source fallback',
     },
   };
+}
+
+function normalizeLiveDetailStatus(detail: SmithersRunDetail): SmithersRunDetail {
+  if (!isTerminalSmithersStatus(detail.run?.status)) return detail;
+  return {
+    ...detail,
+    nodes: detail.nodes.map((node) => isActiveSmithersStatus(node.status || node.state)
+      ? { ...node, status: detail.run.status, state: detail.run.status }
+      : node),
+    attempts: detail.attempts.map((attempt) => isActiveSmithersStatus(attempt.status || attempt.state)
+      ? { ...attempt, status: detail.run.status, state: detail.run.status }
+      : attempt),
+  };
+}
+
+function isTerminalSmithersStatus(status: unknown): boolean {
+  const raw = String(status || '').toLowerCase();
+  return raw === 'finished' || raw === 'failed' || raw === 'cancelled' || raw === 'canceled' || raw === 'succeeded';
+}
+
+function isActiveSmithersStatus(status: unknown): boolean {
+  const raw = String(status || '').toLowerCase();
+  return raw === 'running' || raw === 'in-progress' || raw === 'in_progress' || raw === 'pending' || raw === 'queued' || raw.startsWith('waiting-');
 }
 
 function visualStatus(status: unknown): string {
