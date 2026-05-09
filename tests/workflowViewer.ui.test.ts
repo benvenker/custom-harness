@@ -691,6 +691,17 @@ describe("project workflow live run inspection helpers", () => {
     );
   });
 
+  it("does not auto-load a just-started project run as historical inspection before live polling", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const branchMatch = html.match(
+      /if \(currentWorkflowId\) \{(?<body>[\s\S]*?)\n    \}\n\n    if \(!currentRunMeta/
+    );
+    const branch = branchMatch?.groups?.body ?? "";
+    expect(branch).toContain("startProjectRunInspection({");
+    expect(branch).toContain("await refreshProjectRuns();");
+    expect(branch).not.toContain("await refreshProjectRuns(result.runId)");
+  });
+
   it("cancels active live polling before loading a historical project run", () => {
     const html = readFileSync("web/index.html", "utf8");
     const loadProjectRun = html.match(

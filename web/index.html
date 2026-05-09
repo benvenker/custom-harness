@@ -3155,7 +3155,7 @@
           currentWorkflowGraph.runStatus = result.status;
           await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: false });
         }
-        await refreshProjectRuns(result.runId);
+        await refreshProjectRuns();
         startProjectRunInspection({
           runId: result.runId,
           inspectionUrl: result.inspection?.url,
