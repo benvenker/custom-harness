@@ -11,6 +11,7 @@ import {
 } from "../runs/smithersGraph.js";
 import { buildSmithersRunOverlayState } from "../ui/smithersRunOverlay.js";
 import type {
+  SmithersRunAttempt,
   SmithersRunDetail,
   SmithersRunDetailView,
   SmithersRunFrame,
@@ -128,6 +129,7 @@ function descriptorsFromFrame(
 ): TaskDescriptor[] {
   const xmlTasks = taskElements(frame.xml as XmlNode | null);
   const seedsById = taskSeedsByNodeId(frame.taskIndex);
+  const attemptSeeds = latestAttemptSeeds(detail.attempts);
   const nodesById = latestRunNodesById(detail.nodes);
   const seen = new Set<string>();
   const descriptors: TaskDescriptor[] = [];
@@ -136,7 +138,10 @@ function descriptorsFromFrame(
     const nodeId = element.props.id;
     if (!nodeId) return;
     seen.add(nodeId);
-    const seed = seedsById.get(nodeId) ?? { nodeId };
+    const seed = mergeTaskSeeds(
+      seedsById.get(nodeId) ?? { nodeId },
+      attemptSeedFor(attemptSeeds, nodeId, seedsById.get(nodeId)?.iteration)
+    );
     descriptors.push(
       toTaskDescriptor({
         seed,
@@ -147,8 +152,12 @@ function descriptorsFromFrame(
     );
   });
 
-  for (const seed of seedsById.values()) {
-    if (seen.has(seed.nodeId)) continue;
+  for (const frameSeed of seedsById.values()) {
+    if (seen.has(frameSeed.nodeId)) continue;
+    const seed = mergeTaskSeeds(
+      frameSeed,
+      attemptSeedFor(attemptSeeds, frameSeed.nodeId, frameSeed.iteration)
+    );
     descriptors.push(
       toTaskDescriptor({
         seed,
@@ -220,6 +229,109 @@ function taskSeedsByNodeId(
     if (seed) seeds.set(seed.nodeId, seed);
   }
   return seeds;
+}
+
+type LatestAttemptSeeds = {
+  byNodeAndIteration: Map<string, HistoricalTaskSeed>;
+  byNode: Map<string, HistoricalTaskSeed>;
+};
+
+function latestAttemptSeeds(attempts: SmithersRunAttempt[]): LatestAttemptSeeds {
+  const latest = new Map<string, SmithersRunAttempt>();
+  for (const attempt of attempts) {
+    const key = attemptKey(attempt.nodeId, attempt.iteration);
+    const existing = latest.get(key);
+    if (!existing || compareAttemptFreshness(attempt, existing) > 0) {
+      latest.set(key, attempt);
+    }
+  }
+
+  const byNodeAndIteration = new Map<string, HistoricalTaskSeed>();
+  const byNode = new Map<string, HistoricalTaskSeed>();
+  for (const attempt of latest.values()) {
+    const seed = taskSeedFromAttempt(attempt);
+    if (!seed) continue;
+    byNodeAndIteration.set(attemptKey(seed.nodeId, seed.iteration ?? 0), seed);
+    const existing = byNode.get(seed.nodeId);
+    if (!existing) {
+      byNode.set(seed.nodeId, seed);
+      continue;
+    }
+    const existingAttempt = latest.get(attemptKey(existing.nodeId, existing.iteration ?? 0));
+    if (!existingAttempt || compareAttemptFreshness(attempt, existingAttempt) > 0) {
+      byNode.set(seed.nodeId, seed);
+    }
+  }
+  return { byNodeAndIteration, byNode };
+}
+
+function taskSeedFromAttempt(attempt: SmithersRunAttempt): HistoricalTaskSeed | null {
+  if (!isRecord(attempt.meta)) return null;
+  const agentId = stringValue(attempt.meta.agentId);
+  const agentModel = stringValue(attempt.meta.agentModel);
+  const agent = agentId || agentModel
+    ? {
+        ...(agentId ? { id: agentId } : {}),
+        ...(agentModel ? { model: agentModel } : {}),
+        generate: async () => ({}),
+      }
+    : undefined;
+  return {
+    nodeId: attempt.nodeId,
+    iteration: attempt.iteration,
+    prompt: stringValue(attempt.meta.prompt),
+    label: stringValue(attempt.meta.label),
+    outputTableName: stringValue(attempt.meta.outputTable),
+    needsApproval: booleanValue(attempt.meta.needsApproval),
+    agent,
+  };
+}
+
+function attemptSeedFor(
+  seeds: LatestAttemptSeeds,
+  nodeId: string,
+  iteration?: number
+): HistoricalTaskSeed | undefined {
+  if (typeof iteration === "number") {
+    const exact = seeds.byNodeAndIteration.get(attemptKey(nodeId, iteration));
+    if (exact) return exact;
+  }
+  return seeds.byNode.get(nodeId);
+}
+
+function attemptKey(nodeId: string, iteration: number) {
+  return `${nodeId}\0${iteration}`;
+}
+
+function compareAttemptFreshness(a: SmithersRunAttempt, b: SmithersRunAttempt) {
+  return (
+    (a.finishedAtMs ?? 0) - (b.finishedAtMs ?? 0) ||
+    a.startedAtMs - b.startedAtMs ||
+    a.attempt - b.attempt
+  );
+}
+
+function mergeTaskSeeds(
+  primary: HistoricalTaskSeed,
+  fallback?: HistoricalTaskSeed
+): HistoricalTaskSeed {
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    prompt: firstNonEmptyString(primary.prompt, fallback.prompt),
+    label: firstNonEmptyString(primary.label, fallback.label),
+    outputTableName: firstNonEmptyString(primary.outputTableName, fallback.outputTableName),
+    dependsOn: primary.dependsOn ?? fallback.dependsOn,
+    needs: primary.needs ?? fallback.needs,
+    needsApproval: primary.needsApproval ?? fallback.needsApproval,
+    approvalMode: primary.approvalMode ?? fallback.approvalMode,
+    worktreeId: primary.worktreeId ?? fallback.worktreeId,
+    worktreePath: primary.worktreePath ?? fallback.worktreePath,
+    parallelGroupId: primary.parallelGroupId ?? fallback.parallelGroupId,
+    meta: primary.meta ?? fallback.meta,
+    agent: primary.agent ?? fallback.agent,
+  };
 }
 
 function flattenTaskIndex(value: unknown): unknown[] {

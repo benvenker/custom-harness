@@ -1829,9 +1829,10 @@
     return projectLiveStateHelperPromise;
   }
 
-  async function renderProjectGraphForCurrentState({ previewGraph, liveMode = false, liveDetail = null }) {
+  async function renderProjectGraphForCurrentState({ previewGraph, liveMode = false, liveDetail = null, shouldApply = null }) {
     const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
     const decision = deriveProjectRenderedGraph({ previewGraph, liveMode, liveDetail });
+    if (shouldApply && !shouldApply()) return decision;
     if (decision.mode === "live") {
       SAMPLES._project = decision.graph;
       loadSample("_project");
@@ -2665,7 +2666,18 @@
 
   function activeProjectRunIsCancellable() {
     const status = projectRunInspection?.status || currentRunMeta?.smithersRunDetail?.run?.status || currentRunMeta?.status;
-    return Boolean(currentWorkflowId && projectRunInspection?.runId && status && !["finished", "failed", "cancelled", "canceled", "succeeded"].includes(String(status).toLowerCase()));
+    return Boolean(currentWorkflowId
+      && currentRunMeta?.liveSmithers === true
+      && projectRunInspection?.runId
+      && projectRunInspection.runId === currentRunId
+      && status
+      && !["finished", "failed", "cancelled", "canceled", "succeeded"].includes(String(status).toLowerCase()));
+  }
+
+  function stopProjectRunInspection() {
+    projectRunInspectionSeq += 1;
+    projectRunInspection = null;
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = true;
   }
 
   function setRunButtonsBusy(isBusy) {
@@ -2738,6 +2750,9 @@
     if (meta.status === "failed" || meta.status === "error") {
       provBadge.classList.add("failed");
       provBadge.textContent = String(meta.status);
+    } else if (meta.status === "preview" || meta.status === "project") {
+      provBadge.classList.add("synth");
+      provBadge.textContent = "Current Workflow Source preview";
     } else if (typeof meta.notes === "string" && /synth/i.test(meta.notes)) {
       provBadge.classList.add("synth");
       provBadge.textContent = "partial · synth";
@@ -2839,13 +2854,13 @@
   }
 
   async function loadProjectRun(runId) {
+    stopProjectRunInspection();
     const response = await fetch(`/api/smithers/runs/${encodeURIComponent(runId)}?includeOutputs=true&frameLimit=5&eventLimit=500`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Smithers run detail ${response.status}`);
     const data = await response.json();
     if (data.ok === false) throw new Error(data.error || data.code || "Smithers run detail failed");
     const detail = data.detail || data;
     currentRunMeta = {
-      ...(currentRunMeta || {}),
       id: runId,
       inspectionUrl: `/api/smithers/runs/${encodeURIComponent(runId)}`,
       smithersRunDetail: detail,
@@ -2992,6 +3007,7 @@
         detail.events = [...eventsBySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
       }
       const status = detail?.run?.status || data.status || state.status || "unknown";
+      if (seq !== projectRunInspectionSeq || projectRunInspection !== state || currentRunId !== state.runId) return;
       state.status = status;
       state.notFoundRetries = 0;
       if (typeof detail?.cursors?.nextEventSeq === "number") {
@@ -3005,11 +3021,21 @@
         liveSmithers: true,
         isSmithersWorkflow: true,
       };
-      if (currentWorkflowGraph && currentRunId === state.runId) {
+      const livePollStillCurrent = () => seq === projectRunInspectionSeq
+        && projectRunInspection === state
+        && currentRunId === state.runId
+        && currentRunMeta?.liveSmithers === true;
+      if (currentWorkflowGraph && livePollStillCurrent()) {
         currentWorkflowGraph.runId = state.runId;
         currentWorkflowGraph.runStatus = status;
-        await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: true, liveDetail: detail });
+        await renderProjectGraphForCurrentState({
+          previewGraph: currentWorkflowGraph,
+          liveMode: true,
+          liveDetail: detail,
+          shouldApply: livePollStillCurrent,
+        });
       }
+      if (seq !== projectRunInspectionSeq || projectRunInspection !== state || currentRunId !== state.runId || currentRunMeta?.liveSmithers !== true) return;
       runIdEl.textContent = state.runId;
       setProvenance({ liveSmithers: true, status });
       setRunActionStatus(`Smithers SQLite · live run ${shortId(state.runId)} · ${status}`, runStatusKind(status));
@@ -3388,6 +3414,7 @@
         liveMode: Boolean(currentRunMeta?.liveSmithers && currentRunMeta?.smithersRunDetail),
         liveDetail: currentRunMeta?.smithersRunDetail,
       });
+      if (!currentRunMeta?.liveSmithers) setProvenance({ status: "preview", notes: "Current Workflow Source preview" });
       setRunActionStatus(`Preview updated for ${currentWorkflowId}`, "ok");
     } catch (err) {
       setRunActionStatus(`Preview failed · ${err.message}`, "error");

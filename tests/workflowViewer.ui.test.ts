@@ -690,6 +690,53 @@ describe("project workflow live run inspection helpers", () => {
       "waitForRunToRender("
     );
   });
+
+  it("cancels active live polling before loading a historical project run", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const loadProjectRun = html.match(
+      /async function loadProjectRun\(runId\) \{(?<body>[\s\S]*?)\n  async function loadRun/
+    )?.groups?.body ?? "";
+    expect(loadProjectRun).toContain("stopProjectRunInspection();");
+    expect(loadProjectRun).toContain("liveSmithers: false");
+    expect(loadProjectRun).not.toContain("...(currentRunMeta || {})");
+  });
+
+  it("guards live poll UI mutations so stale polling cannot overwrite a selected historical run", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const pollBody = html.match(
+      /async function pollProjectRunInspectionOnce\(seq\) \{(?<body>[\s\S]*?)\n  function attachOutputMetadata/
+    )?.groups?.body ?? "";
+    expect(pollBody).toContain("currentRunId !== state.runId");
+    expect(pollBody).toContain("projectRunInspection !== state");
+    expect(pollBody).toContain("currentRunMeta?.liveSmithers !== true");
+    expect(pollBody).toContain("shouldApply: livePollStillCurrent");
+  });
+
+  it("checks live freshness inside project graph rendering before mutating UI", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const renderHelper = html.match(
+      /async function renderProjectGraphForCurrentState\(\{(?<body>[\s\S]*?)\n  async function renderHistoricalProjectRunGraph/
+    )?.groups?.body ?? "";
+    const guardIndex = renderHelper.indexOf("if (shouldApply && !shouldApply()) return decision;");
+    const firstMutationIndex = renderHelper.indexOf("SAMPLES._project = decision.graph");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(firstMutationIndex).toBeGreaterThan(guardIndex);
+  });
+
+  it("only enables Stop Run for the selected live project run", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const cancellable = html.match(
+      /function activeProjectRunIsCancellable\(\) \{(?<body>[\s\S]*?)\n  function stopProjectRunInspection/
+    )?.groups?.body ?? "";
+    expect(cancellable).toContain("currentRunMeta?.liveSmithers === true");
+    expect(cancellable).toContain("projectRunInspection.runId === currentRunId");
+  });
+
+  it("labels the project preview as current Workflow Source provenance", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    expect(html).toContain("Current Workflow Source preview");
+    expect(html).toContain('meta.status === "preview" || meta.status === "project"');
+  });
 });
 
 describe("project workflow live render state helpers", () => {

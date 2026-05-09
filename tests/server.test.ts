@@ -708,6 +708,99 @@ describe("HTTP server DB-backed Smithers run inspection API", () => {
     );
   });
 
+  it("uses persisted attempt metadata for historical prompt and model when frame taskIndex is minimal", async () => {
+    const runId = "historical-attempt-metadata-run";
+    const projectRoot = tempProjectWithCurrentWorkflowSource(`
+      export const currentOnly = {
+        prompt: 'CURRENT SOURCE ONLY PROMPT',
+        model: 'openrouter/current-source-only-model',
+      };
+    `);
+    const historicalXml = smithersWorkflowXml("historical-attempt-metadata", [
+      smithersTaskXml("attempt-metadata-node", "Frame label"),
+    ]);
+    const detail = smithersRunDetail({
+      run: smithersRunSummary({
+        runId,
+        workflowName: "truth-workflow",
+        workflowPath: join(projectRoot, ".smithers/workflows/truth-workflow.tsx"),
+        status: "finished",
+      }),
+      nodes: [smithersHistoricalNode(runId, "attempt-metadata-node")],
+      attempts: [
+        {
+          runId,
+          nodeId: "attempt-metadata-node",
+          iteration: 0,
+          attempt: 1,
+          state: "finished",
+          status: "finished",
+          startedAtMs: 2000,
+          finishedAtMs: 2500,
+          heartbeatAtMs: null,
+          heartbeatDataJson: null,
+          heartbeatData: null,
+          errorJson: null,
+          error: null,
+          jjPointer: null,
+          responseText: null,
+          jjCwd: null,
+          cached: false,
+          metaJson: JSON.stringify({
+            prompt: "Prompt captured in Smithers attempt metadata",
+            label: "Attempt metadata label",
+            outputTable: "attempt_outputs",
+            agentId: "captured-agent",
+            agentModel: "openrouter/captured-model",
+          }),
+          meta: {
+            prompt: "Prompt captured in Smithers attempt metadata",
+            label: "Attempt metadata label",
+            outputTable: "attempt_outputs",
+            agentId: "captured-agent",
+            agentModel: "openrouter/captured-model",
+          },
+        },
+      ],
+      frames: [
+        smithersFrame({
+          runId,
+          frameNo: 9,
+          xml: historicalXml,
+          taskIndexJson:
+            '[{"nodeId":"attempt-metadata-node","ordinal":0,"iteration":0}]',
+          taskIndex: [
+            { nodeId: "attempt-metadata-node", ordinal: 0, iteration: 0 },
+          ],
+        }),
+      ],
+    });
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot,
+      createSmithersRunReader: () => fakeSmithersRunReader({ detail }),
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/api/smithers/runs/${runId}`)
+    );
+    const body = (await response.json()) as any;
+    const historicalNode = body.detail.view.graph.nodes.find(
+      (node: { id: string }) => node.id === "attempt-metadata-node"
+    );
+
+    expect(response.status).toBe(200);
+    expect(historicalNode).toEqual(
+      expect.objectContaining({
+        prompt: "Prompt captured in Smithers attempt metadata",
+        agent: "smithers · openrouter/captured-model",
+      })
+    );
+    expect(JSON.stringify(body.detail.view.graph)).not.toContain(
+      "CURRENT SOURCE ONLY"
+    );
+  });
+
   it("returns a structured 404 and closes the reader when a Smithers run is missing", async () => {
     const calls: Array<{ runId: string; options: unknown }> = [];
     let closeCalls = 0;
