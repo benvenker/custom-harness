@@ -123,10 +123,10 @@ type SmithersRunInspection = {
   view?: {
     graph?: RenderGraph;
     graphSource: {
-      kind: "smithers-frame" | "fallback-current-source" | "unavailable";
+      kind: "smithers-frame" | "unavailable";
       runId: string;
       frameNo?: number;
-      fallback: boolean;
+      fallback: false;
       reason?: string;
     };
   };
@@ -158,6 +158,7 @@ In scope now:
 - Preserve frame `xmlJson`, parsed `xml`, `taskIndexJson`, and parsed `taskIndex`.
 - Use Smithers adapter/package frame inflation for latest frames.
 - Add optional server-side `view.graph` from the latest persisted Run Frame.
+- For v1, include `detail.view` by default on `GET /api/smithers/runs/:runId`; no `include=view` query is required for the first historical implementation.
 - Update browser historical Run Inspection to consume `detail.view.graph`.
 - Disable or separate source-editing controls during historical inspection.
 
@@ -288,7 +289,7 @@ Tasks:
 - Overlay node/attempt/output/event status from the same Run.
 - Return the projection as optional `detail.view.graph`.
 - Return explicit `view.graphSource` provenance.
-- If projection is unavailable, return `graphSource.kind === 'unavailable'` or a clearly labeled fallback. Do not silently use current Workflow Source.
+- If projection is unavailable, return `graphSource.kind === 'unavailable'` and omit `detail.view.graph`. Do not use current Workflow Source as a historical fallback in v1.
 
 Important constraint:
 
@@ -317,9 +318,9 @@ Tests to add/update:
 
 - `tests/server.test.ts`
   - `/api/smithers/runs/:runId` returns high-fidelity frame data.
-  - include/query params behave predictably.
+  - `detail.view` is included by default for v1 when projection is available or explicitly unavailable.
   - optional `view.graph` reports `graphSource.kind === 'smithers-frame'` and matching `frameNo`.
-  - missing frame fallback is explicitly marked, if implemented.
+  - unavailable frame/projection cases are explicitly marked with `graphSource.kind === 'unavailable'`; `fallback-current-source` is not valid for historical v1.
 
 - `tests/smithersGraph.test.ts` or new projection tests
   - graph projection from persisted frame does not require current Workflow Source.
@@ -350,6 +351,14 @@ Acceptance criteria:
 - Editing controls do not appear inline as if they mutate historical nodes.
 - Current workflow preview/edit path still works.
 - Existing live-run polling still works or has a clearly separated path.
+
+Browser-like UI verification guidance for agents:
+
+- Keep TDD/unit/helper tests as the primary acceptance gate. Use browser-like checks only to verify visible UI behavior that unit tests cannot fully cover.
+- Prefer a project-provided browser harness if one is added and documented in `package.json` or project docs. If no project harness exists, use the shared Playwright MCP server through `mcporter`.
+- Before using Playwright, verify the shared server instead of launching a parallel runtime: `command -v mcporter`, `mcporter config list`, and `mcporter list playwright --schema`. In this repo, the configured server is named `playwright` and runs Chrome via `npx -y @playwright/mcp@latest --extension --browser=chrome`.
+- Use snapshots and console/network checks for evidence, not screenshots alone: navigate to the local viewer, select a historical run fixture, assert provenance copy, assert no stale preview graph/current-source-only labels appear, and assert no inline historical “Save to workflow” controls appear.
+- Do not require browser automation for server-only beads (`bdz`, `f52`). It is expected for UI beads (`71e`, `nuu`) after the relevant tests pass or when debugging UI behavior.
 
 ## Suggested bead breakdown
 
@@ -387,7 +396,7 @@ Acceptance criteria:
 ## Open questions for later grilling
 
 1. Which broad Smithers tables/read surfaces are essential for v1 besides runs/nodes/attempts/events/frames/outputs?
-2. Should `view.graph` be included by default or only with `include=view`?
+2. After v1, should `detail.view` stay default on the bundle endpoint or move behind `include=view` for large-run performance?
 3. How should very large outputs/events be paginated or lazily loaded?
 4. How should the UI distinguish live Run Inspection from completed historical Run Inspection?
 5. How much raw DB row shape should be exposed versus mechanically camelCased normalized shape?
