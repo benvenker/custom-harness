@@ -1851,6 +1851,20 @@
     return decision;
   }
 
+  async function renderHistoricalProjectRunGraph(detail) {
+    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: currentWorkflowId });
+    SAMPLES._project = decision.graph;
+    loadSample("_project");
+    if (decision.mode === "historical-frame") {
+      setProvenance({ smithersRunDetail: detail, historicalSmithers: true, graphSource: decision.provenance.graphSource });
+    } else {
+      setProvenance({ historicalUnavailable: true, status: "unavailable", notes: decision.error });
+      setRunActionStatus(`Historical graph unavailable · ${decision.error}`, "error");
+    }
+    return decision;
+  }
+
   function workflowPathForCurrentProject() {
     if (!currentWorkflowId) return null;
     const workflows = currentProject?.workflows;
@@ -2054,6 +2068,10 @@
     return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
   }
 
+  function isHistoricalRunInspection() {
+    return Boolean(currentWorkflowId && currentRunMeta?.smithersRunDetail && !currentRunMeta?.liveSmithers);
+  }
+
   function liveSmithersDetail() {
     return currentRunMeta?.smithersRunDetail ?? null;
   }
@@ -2117,8 +2135,17 @@
       ? `<div class="node-edit-note">No Smithers frame metadata recorded yet.</div>`
       : `<div class="val mono">${frames.map(frame => `frame ${frame.frameNo} · mounted ${(frame.mountedTaskIds || []).join(", ") || "—"}${frame.note ? ` · ${frame.note}` : ""}`).map(escapeHtml).join("<br>")}</div>`;
 
+    const historical = isHistoricalRunInspection();
+    const graphSource = detail?.view?.graphSource;
+    const provenance = historical && graphSource?.kind === "smithers-frame"
+      ? `Smithers Run Frame · historical run · ${escapeHtml(graphSource.runId)} · frame ${escapeHtml(graphSource.frameNo)}`
+      : "Smithers SQLite · live run";
+    const provenanceHelp = historical
+      ? "Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph is projected from the selected run's persisted Smithers Run Frame; current Workflow Source was not used as a fallback."
+      : "Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph layout remains the preview projection.";
+
     return `
-      <div class="explain-box"><b>Smithers SQLite · live run</b><br>Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph layout remains the preview projection.</div>
+      <div class="explain-box"><b>${provenance}</b><br>${provenanceHelp}</div>
       <div class="field">
         <div class="lbl"><span>Smithers run state</span><span class="output-meta">raw status</span></div>
         <div class="val mono">run ${escapeHtml(detail.run?.runId || currentRunId || "unknown")} · ${escapeHtml(detail.run?.status || "unknown")}<br>node ${escapeHtml(nodeId || node.id)} · ${escapeHtml(dbNode?.status || "not recorded")} · iteration ${escapeHtml(iteration ?? "—")}</div>
@@ -2268,10 +2295,11 @@
 
     const tlRows = buildTimelineHtml(node.timeline, isHarness, node.id);
     const selectedAtRender = node.id;
-    const isProjectInputNode = Boolean(currentWorkflowId && node.type === "goal");
+    const historicalInspection = isHistoricalRunInspection();
+    const isProjectInputNode = Boolean(currentWorkflowId && node.type === "goal" && !historicalInspection);
     const isProjectTask = Boolean(currentWorkflowId && node.type === "task");
-    if (isProjectTask) ensureProjectInspectorState(node, selectedAtRender);
-    const projectInspectorState = isProjectTask ? buildProjectInspectorStateSync(node) : null;
+    if (isProjectTask && !historicalInspection) ensureProjectInspectorState(node, selectedAtRender);
+    const projectInspectorState = isProjectTask && !historicalInspection ? buildProjectInspectorStateSync(node) : null;
     const editable = !isProjectTask && isEditableTask(node);
     const editScopeId = currentRunId || "project";
     const draft = editable ? getPromptDraft(editScopeId, node.id) : undefined;
@@ -2330,11 +2358,16 @@
           </div>`
       : "";
     const sourceExplanation = currentWorkflowId
-      ? `<div class="explain-box">
-          <b>How to read this:</b><br>
-          <b>Input</b> renders prompts. <b>Pretend output</b> lets downstream nodes preview as if this node already produced a value. <b>Source</b> defines nodes, agents, and dependencies. This preview is not live run state.<br>
-          <button class="source-link-btn" id="sourceLinkBtn">Edit source for workflow ${escapeHtml(currentWorkflowId)}</button>
-        </div>`
+      ? historicalInspection
+        ? `<div class="explain-box">
+            <b>Historical Run Inspection:</b><br>
+            The graph is projected from the selected run's persisted Smithers Run Frame. Smithers SQLite rows below are run state for this historical run. Current Workflow Source is only for previewing/editing future runs and is not used as a graph fallback here.
+          </div>`
+        : `<div class="explain-box">
+            <b>How to read this:</b><br>
+            <b>Input</b> renders prompts. <b>Pretend output</b> lets downstream nodes preview as if this node already produced a value. <b>Source</b> defines nodes, agents, and dependencies. This preview is not live run state.<br>
+            <button class="source-link-btn" id="sourceLinkBtn">Edit source for workflow ${escapeHtml(currentWorkflowId)}</button>
+          </div>`
       : "";
     const liveSmithersSections = node.type === "task" ? renderLiveSmithersInspectorSections(node, isHarness) : "";
     const legacyOutputHtml = liveDetail ? "" : outputFieldHtml(node);
@@ -2373,7 +2406,7 @@
       </div>
     `;
 
-    inspector.querySelector("#sourceLinkBtn")?.addEventListener("click", openWorkflowSourceEditor);
+    if (!historicalInspection) inspector.querySelector("#sourceLinkBtn")?.addEventListener("click", openWorkflowSourceEditor);
     inspector.querySelector("#saveStructuredBtn")?.addEventListener("click", saveStructuredWorkflowFields);
     hydrateModelSelects();
     inspector.querySelector("#initialWorkflowPromptArea")?.addEventListener("input", (event) => {
@@ -2689,9 +2722,17 @@
       provBadge.textContent = "Smithers SQLite · live run";
       return;
     }
+    if (meta.historicalUnavailable) {
+      provBadge.classList.add("failed");
+      provBadge.textContent = "Run Frame unavailable";
+      return;
+    }
     if (meta.smithersRunDetail) {
       provBadge.classList.add("real");
-      provBadge.textContent = "Smithers SQLite · run";
+      const source = meta.graphSource || meta.smithersRunDetail?.view?.graphSource;
+      provBadge.textContent = source?.kind === "smithers-frame"
+        ? `Run Frame · ${shortId(source.runId)} · frame ${source.frameNo}`
+        : "Smithers SQLite · run";
       return;
     }
     if (meta.status === "failed" || meta.status === "error") {
@@ -2812,14 +2853,8 @@
       isSmithersWorkflow: true,
       workflowPath: workflowPathForCurrentProject(),
     };
-    if (currentWorkflowGraph) {
-      const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
-      const decision = deriveProjectRenderedGraph({ previewGraph: currentWorkflowGraph, liveMode: true, liveDetail: detail });
-      SAMPLES._project = decision.graph;
-      loadSample("_project");
-    }
+    await renderHistoricalProjectRunGraph(detail);
     setCurrentRunId(runId);
-    setProvenance(currentRunMeta);
     setRunActionStatus(`Loaded Smithers run ${shortId(runId)} · ${detail.run?.status || "unknown"}`, runStatusKind(detail.run?.status));
     if (runsSelect) runsSelect.value = runId;
     return detail;
@@ -2968,6 +3003,7 @@
         inspectionUrl: state.inspectionUrl,
         smithersRunDetail: detail,
         liveSmithers: true,
+        isSmithersWorkflow: true,
       };
       if (currentWorkflowGraph && currentRunId === state.runId) {
         currentWorkflowGraph.runId = state.runId;

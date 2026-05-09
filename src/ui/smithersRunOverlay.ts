@@ -16,6 +16,7 @@ export type OverlayRenderNode = {
   smithers?: {
     nodeId?: string;
     meta?: unknown;
+    [key: string]: unknown;
   };
   timeline?: unknown[];
   [key: string]: unknown;

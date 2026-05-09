@@ -144,6 +144,10 @@ type SmithersRunDetailFixture = {
   }>;
   cursors: { nextEventSeq: number | null };
   parseWarnings: unknown[];
+  view?: {
+    graph?: OverlayRenderGraph;
+    graphSource: unknown;
+  };
 };
 
 type SmithersRunOverlayHelper = {
@@ -228,6 +232,21 @@ type ProjectRenderedGraphDecision = {
   error?: string;
 };
 
+type ProjectHistoricalRunGraphDecision = {
+  mode: "historical-frame" | "historical-unavailable";
+  graph: OverlayRenderGraph | null;
+  provenance: {
+    historicalSmithers: boolean;
+    label: string;
+    runId: string;
+    status: string;
+    graphSource: unknown;
+    error?: string;
+  };
+  visibleCopy: string[];
+  error?: string;
+};
+
 type ProjectLiveStateHelper = {
   deriveProjectRenderedGraph(options: {
     previewGraph: OverlayRenderGraph;
@@ -242,6 +261,10 @@ type ProjectLiveStateHelper = {
       visibleCopy?: string[];
     };
   }): ProjectRenderedGraphDecision;
+  deriveHistoricalProjectRunGraph(options: {
+    detail: SmithersRunDetailFixture;
+    workflowId?: string | null;
+  }): ProjectHistoricalRunGraphDecision;
 };
 
 async function loadInspectorHelper(): Promise<{
@@ -670,6 +693,102 @@ describe("project workflow live run inspection helpers", () => {
 });
 
 describe("project workflow live render state helpers", () => {
+  it("uses the frame-backed view.graph for historical Smithers runs instead of the current preview graph", async () => {
+    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const currentPreviewGraph = previewGraphForOverlay([
+      previewTaskNode({
+        id: "current-source-only",
+        title: "Current Source Only",
+        prompt: "Current Workflow Source prompt must not appear historically",
+        smithers: { nodeId: "current-source-only" },
+      }),
+    ]);
+    const historicalGraph = previewGraphForOverlay([
+      previewTaskNode({
+        id: "historical-node",
+        title: "Persisted Historical Node",
+        prompt: "Prompt captured by persisted Run Frame",
+        status: "finished",
+        smithers: { nodeId: "historical-node" },
+      }),
+    ]);
+    historicalGraph.runId = "historical-run";
+    historicalGraph.source = { kind: "smithers", frameNo: 7 };
+    const detail = smithersRunDetailFixture({
+      run: { runId: "historical-run", status: "finished", workflowName: "foo" },
+      nodes: [
+        {
+          runId: "historical-run",
+          nodeId: "historical-node",
+          iteration: 0,
+          state: "finished",
+          status: "finished",
+          outputTable: "historical_outputs",
+          label: "Persisted Historical Node",
+        },
+      ],
+      view: {
+        graph: historicalGraph,
+        graphSource: {
+          kind: "smithers-frame",
+          runId: "historical-run",
+          frameNo: 7,
+          fallback: false,
+        },
+      },
+    });
+
+    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: "foo" });
+
+    expect(decision.mode).toBe("historical-frame");
+    expect(decision.graph?.runId).toBe("historical-run");
+    expect(decision.graph?.source).toEqual(
+      expect.objectContaining({
+        kind: "smithers",
+        frameNo: 7,
+        note: expect.stringContaining("historical-run"),
+      })
+    );
+    expect(decision.provenance.label).toContain("Smithers Run Frame");
+    expect(decision.provenance.label).toContain("frame 7");
+    expect(decision.visibleCopy).toContain("Smithers Run Frame · historical run");
+    expect(decision.visibleCopy).toContain("frame 7");
+    expect(decision.graph?.nodes.map((node) => node.id)).toContain("historical-node");
+    expect(decision.graph?.nodes.map((node) => node.id)).not.toContain("current-source-only");
+    expect(JSON.stringify(decision.graph)).not.toContain("Current Workflow Source");
+    expect(JSON.stringify(currentPreviewGraph)).toContain("Current Workflow Source");
+  });
+
+  it("returns an explicit historical unavailable graph instead of falling back to the preview graph", async () => {
+    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const detail = smithersRunDetailFixture({
+      run: { runId: "historical-run", status: "finished", workflowName: "foo" },
+      view: {
+        graphSource: {
+          kind: "unavailable",
+          runId: "historical-run",
+          frameNo: 3,
+          fallback: false,
+          reason: "Persisted Smithers Run Frame XML is missing or malformed.",
+        },
+      },
+    });
+
+    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: "foo" });
+
+    expect(decision.mode).toBe("historical-unavailable");
+    expect(decision.error).toMatch(/missing|malformed/i);
+    expect(decision.graph?.nodes).toEqual([
+      expect.objectContaining({
+        id: "historical-graph-unavailable",
+        title: "Historical graph unavailable",
+        prompt: expect.stringContaining("No current Workflow Source graph fallback"),
+      }),
+    ]);
+    expect(decision.provenance.label).toContain("Smithers Run Frame unavailable");
+    expect(decision.visibleCopy).toContain("No current Workflow Source graph fallback was used.");
+  });
+
   it("renders a refreshed preview graph through the DB overlay when live Smithers detail exists", async () => {
     const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
     const refreshedPreview = previewGraphForOverlay([
