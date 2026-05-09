@@ -1,0 +1,3508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>custom-harness — Smithers durable outcome runner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bone:    #F2EDE2;
+    --bone-2:  #ECE5D4;
+    --bone-3:  #E3DAC4;
+    --paper:   #FAF6EC;
+    --ink:     #111110;
+    --ink-2:   #2A2924;
+    --muted:   #6B6760;
+    --rule:    #1B1A17;
+    --hair:    rgba(17,17,16,0.14);
+    --hair-2:  rgba(17,17,16,0.08);
+
+    --workflow: #1D3CFF;   /* Smithers DAG / multi-task path */
+    --harness:  #D8543D;   /* Smithers single CLI-agent task */
+    --ok:       #2C7A3F;
+    --warn:     #B7791F;
+
+    --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --sans:  "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    background: var(--bone);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* paper grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background-image:
+      radial-gradient(rgba(17,17,16,0.035) 1px, transparent 1px),
+      radial-gradient(rgba(17,17,16,0.025) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    mix-blend-mode: multiply;
+  }
+
+  .frame {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  /* ---------- Top bar ---------- */
+  header.top {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--hair);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .wordmark {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 500;
+    font-style: italic;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+  .glyph {
+    width: 22px; height: 22px;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    position: relative;
+  }
+  .glyph::before, .glyph::after {
+    content: ""; position: absolute; inset: 0;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+  }
+  .glyph::before { transform: translateX(-3px); opacity: .35; }
+  .glyph::after  { transform: translateX(3px);  opacity: .35; }
+
+  .nav-center { display: flex; gap: 28px; color: var(--muted); }
+  .nav-center a { color: inherit; text-decoration: none; }
+  .nav-center a:hover { color: var(--ink); }
+  .nav-center .active { color: var(--ink); border-bottom: 1px solid var(--ink); padding-bottom: 4px; margin-bottom: -5px; }
+
+  .meta-right {
+    justify-self: end;
+    display: flex; align-items: center; gap: 12px;
+    color: var(--muted);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    color: var(--ink);
+    background: var(--bone-2);
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 3px rgba(44,122,63,0.16);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(44,122,63,0.16); }
+    50%     { box-shadow: 0 0 0 6px rgba(44,122,63,0.04); }
+  }
+
+  /* ---------- Goal strip ---------- */
+  .goal-strip {
+    padding: 14px 32px 12px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--paper);
+    position: relative;
+  }
+  .strip-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+    display: flex; gap: 18px; align-items: center;
+  }
+  .strip-label .num {
+    color: var(--ink);
+  }
+  .goal-text {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin: 0;
+    font-variation-settings: "opsz" 96, "SOFT" 50;
+    max-width: 920px;
+  }
+  .goal-edit {
+    width: 100%; max-width: 920px;
+    background: transparent; border: none;
+    font-family: var(--serif); font-size: 22px; font-weight: 400;
+    line-height: 1.2; letter-spacing: -0.02em;
+    color: var(--ink); padding: 0; margin: 0;
+    resize: none; outline: none;
+    font-variation-settings: "opsz" 96, "SOFT" 50;
+  }
+
+  .goal-row {
+    display: flex; gap: 16px; align-items: center;
+    margin-top: 8px; flex-wrap: wrap;
+  }
+  .goal-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px;
+    background: var(--ink);
+    color: var(--bone);
+    border: 1px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .btn:hover { background: var(--workflow); border-color: var(--workflow); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn:disabled:hover {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--bone);
+  }
+  .btn .arrow { transition: transform .2s; }
+  .btn:hover .arrow { transform: translateX(3px); }
+
+  .btn.ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--rule);
+  }
+  .btn.ghost:hover {
+    background: var(--ink);
+    color: var(--bone);
+    border-color: var(--ink);
+  }
+  .btn.ghost:disabled:hover {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--rule);
+  }
+  .run-action-status {
+    min-height: 16px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .run-action-status.error { color: var(--harness); }
+  .run-action-status.ok { color: var(--ok); }
+
+  .sample-bar {
+    margin-left: auto;
+    display: flex; gap: 4px; align-items: center;
+    flex-shrink: 0;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .sample-btn {
+    background: transparent;
+    border: 1px solid var(--hair);
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .sample-btn:hover { border-color: var(--rule); }
+  .sample-btn.active { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+
+  /* runs picker — lives at the top of the inspector */
+  .inspector-runs {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--bone-2);
+    flex-shrink: 0;
+  }
+  .inspector-runs.empty { display: none; }
+  .inspector-runs-label {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .inspector-runs-select {
+    flex: 1 1 auto; min-width: 0;
+    appearance: none; -webkit-appearance: none;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 5px 26px 5px 8px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+      linear-gradient(-45deg, transparent 50%, var(--ink) 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+  }
+  .inspector-runs-select:hover { border-color: var(--ink); }
+  .inspector-runs-select:focus {
+    outline: 2px solid var(--workflow);
+    outline-offset: -1px;
+  }
+  .fork-lineage {
+    background: transparent; border: 1px dashed var(--hair);
+    color: var(--workflow);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 8px; cursor: pointer;
+    flex-shrink: 0;
+  }
+  .fork-lineage[hidden] { display: none; }
+  .fork-lineage:hover { color: var(--ink); border-color: var(--ink); }
+  .fork-of[hidden] { display: none; }
+  .fork-of { color: var(--workflow); }
+  .fork-of-link {
+    background: transparent; border: none; padding: 0;
+    color: var(--workflow);
+    font: inherit;
+    text-transform: uppercase;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .fork-of-link:hover { color: var(--ink); }
+  .forks[hidden] { display: none; }
+  .forks { color: var(--workflow); }
+  .forks-list { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 4px; }
+  .fork-child {
+    background: transparent; border: 1px solid var(--workflow);
+    color: var(--workflow);
+    font: inherit;
+    padding: 1px 6px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  .fork-child:hover { background: var(--workflow); color: var(--bone); }
+  .status-open-run {
+    background: transparent; border: 1px solid currentColor;
+    color: inherit;
+    font: inherit;
+    margin-left: 6px;
+    padding: 1px 6px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  .status-open-run:hover { background: currentColor; }
+  .status-open-run:hover { color: var(--bone); }
+
+  /* Studio bar (top of inspector body when a Task on a real run is selected) */
+  .studio-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    margin-bottom: 14px;
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+  }
+  .studio-status {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .studio-status b { color: var(--workflow); font-weight: 500; }
+  .studio-run {
+    padding: 6px 12px;
+    font-size: 10.5px;
+  }
+  .studio-run:disabled { background: var(--bone-3); border-color: var(--hair); color: var(--muted); }
+  .studio-run:disabled:hover { background: var(--bone-3); border-color: var(--hair); color: var(--muted); }
+
+  /* Editable prompt textarea */
+  .prompt-edit {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    max-height: 260px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 14px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 50;
+    /* Long prompts scroll inside the textarea; keep that scroll from leaking
+       out into .insp-body and the canvas grid (root cause of the wheel jitter). */
+    resize: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+  }
+  .prompt-edit:focus {
+    outline: 2px solid var(--workflow);
+    outline-offset: -1px;
+  }
+  .prompt-edit.edited {
+    background: rgba(216,84,61,0.05);
+    border-color: var(--harness);
+  }
+  .edit-pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--harness);
+    color: var(--harness);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .prompt-reset {
+    background: transparent; border: none;
+    color: var(--harness);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; padding: 0;
+    text-decoration: underline;
+  }
+  .prompt-reset:hover { color: var(--ink); }
+  .source-edit {
+    display: block;
+    width: 100%;
+    min-height: 460px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--bone-2);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+  .node-edit-note {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.4;
+    margin-top: 6px;
+  }
+
+  /* provenance badge in plan strip */
+  .prov {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid;
+    color: var(--muted);
+    border-color: var(--hair);
+  }
+  .prov.real    { color: var(--ok);      border-color: var(--ok); }
+  .prov.synth   { color: var(--warn);    border-color: var(--warn); }
+  .prov.failed  { color: var(--harness); border-color: var(--harness); }
+  .prov.demo    { color: var(--muted);   border-color: var(--hair); }
+  .prov:empty { display: none; }
+
+  /* ---------- Plan strip ---------- */
+  .plan-strip {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(360px, 2fr) auto;
+    gap: 28px;
+    padding: 10px 32px;
+    border-bottom: 1px solid var(--hair);
+    align-items: center;
+    background: var(--bone-2);
+  }
+  .plan-cell .k {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .plan-cell .v {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  .plan-cell .v.path {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    color: var(--workflow);
+    display: inline-block;
+  }
+  .plan-cell .v.path.harness { color: var(--harness); }
+  .plan-cell.reason .v {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 60;
+  }
+  .plan-meta {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.5;
+  }
+  .plan-meta b { color: var(--ink); font-weight: 500; }
+
+  /* ---------- Workspace ---------- */
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .canvas-wrap {
+    border-right: 1px solid var(--hair);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background:
+      linear-gradient(var(--bone), var(--bone)),
+      repeating-linear-gradient(0deg,  rgba(17,17,16,0.05) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, rgba(17,17,16,0.05) 0 1px, transparent 1px 24px);
+    background-blend-mode: multiply;
+  }
+  .canvas-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--hair);
+    background: var(--paper);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .canvas-head .left { display: flex; gap: 16px; align-items: center; }
+  .canvas-head .left b { color: var(--ink); font-weight: 500; }
+  .legend {
+    display: flex; gap: 14px; align-items: center;
+  }
+  .swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch i { width: 8px; height: 8px; display: inline-block; border: 1px solid; }
+
+  .canvas {
+    position: relative;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .canvas-inner {
+    position: relative;
+    width: 1080px;
+    height: 920px;        /* JS overrides to fit nodes; never stretches */
+    margin: 0 auto;       /* center horizontally; grid bg fills the rest */
+  }
+  .canvas-svg {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    width: 100%; height: 100%;
+  }
+
+  /* ---------- Node ---------- */
+  .node {
+    position: absolute;
+    width: 280px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    box-shadow: 3px 3px 0 0 var(--ink);
+    cursor: pointer;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+    user-select: none;
+  }
+  .node:hover {
+    transform: translate(-1px,-1px);
+    box-shadow: 5px 5px 0 0 var(--ink);
+  }
+  .node.selected {
+    background: var(--bone-3);
+    box-shadow: 5px 5px 0 0 var(--workflow), 6px 6px 0 1px var(--ink);
+  }
+  .node.harness-node.selected { box-shadow: 5px 5px 0 0 var(--harness), 6px 6px 0 1px var(--ink); }
+  .node.harness-node.selected .n-bar { background: var(--harness); }
+  .node-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .node-head .type {
+    color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .node-head .type b { color: var(--ink); font-weight: 500; }
+  .node-head .status {
+    color: var(--muted);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .node-head .status::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .node.idle .status::before { background: var(--muted); }
+  .node.running .status { color: var(--workflow); }
+  .node.running .status::before {
+    background: var(--workflow);
+    box-shadow: 0 0 0 3px rgba(29,60,255,0.2);
+    animation: pulse-blue 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse-blue {
+    0%,100% { box-shadow: 0 0 0 3px rgba(29,60,255,0.2); }
+    50%     { box-shadow: 0 0 0 6px rgba(29,60,255,0.05); }
+  }
+  .node.done .status { color: var(--ok); }
+  .node.done .status::before { background: var(--ok); }
+  .node.failed .status { color: var(--harness); }
+  .node.failed .status::before { background: var(--harness); }
+  .node.failed { border-color: var(--harness); }
+  .node.failed .node-bar { background: rgba(216,84,61,0.18); }
+  .node.failed .node-bar i { width: 100%; background: var(--harness); animation: none; }
+  .node.failed.selected { box-shadow: 5px 5px 0 0 var(--harness), 6px 6px 0 1px var(--ink); }
+  .node.succeeded-with-unverified-change .status { color: var(--warn); }
+  .node.succeeded-with-unverified-change .status::before { background: var(--warn); }
+
+  .node-body { padding: 10px 12px 12px; }
+  .node-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    margin-bottom: 4px;
+    font-variation-settings: "opsz" 36, "SOFT" 40;
+  }
+  .node-agent {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .node-agent b { color: var(--ink); font-weight: 500; }
+  .node-prompt {
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.45;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .node-tools {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    padding-top: 8px;
+    border-top: 1px dashed var(--hair);
+  }
+  .tool-chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    color: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
+  .tool-chip.active {
+    color: var(--workflow);
+    border-color: var(--workflow);
+    background: rgba(29,60,255,0.05);
+  }
+  .node.harness-node .tool-chip.active {
+    color: var(--harness);
+    border-color: var(--harness);
+    background: rgba(216,84,61,0.05);
+  }
+  .node-bar {
+    height: 3px;
+    background: var(--hair);
+    position: relative;
+    overflow: hidden;
+  }
+  .node-bar i {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--workflow);
+    width: 0%;
+    transition: width .3s ease;
+  }
+  .node.running .node-bar i { animation: indet 1.4s ease-in-out infinite; }
+  @keyframes indet { 0% { left:-30%; width:30% } 100% { left:100%; width:30% } }
+  .node.done .node-bar i { width: 100%; background: var(--ok); }
+  .node.harness-node.running .node-bar i { background: var(--harness); animation: indet 1.4s ease-in-out infinite; }
+
+  /* Node type specifics */
+  .node.goal-node {
+    background: var(--ink);
+    color: var(--bone);
+    border-color: var(--ink);
+  }
+  .node.goal-node .node-head { border-bottom-color: rgba(242,237,226,0.2); color: rgba(242,237,226,0.6); }
+  .node.goal-node .node-head .type b { color: var(--bone); }
+  .node.goal-node .node-title { color: var(--bone); }
+  .node.goal-node .node-agent { color: rgba(242,237,226,0.5); }
+  .node.goal-node .node-prompt { color: rgba(242,237,226,0.85); }
+  .node.goal-node .node-bar { background: rgba(242,237,226,0.15); }
+  .node.goal-node .node-bar i { background: var(--bone); width: 100%; }
+
+  .node.planner-node {
+    background: var(--bone-2);
+  }
+  .node.planner-node .node-title { font-style: italic; }
+  .node.planner-node .node-head .type b { color: var(--workflow); }
+  .node.planner-node.harness-decision .node-head .type b { color: var(--harness); }
+  .node.harness-node .node-head .type b { color: var(--harness); }
+
+  /* ---------- Inspector ---------- */
+  .inspector {
+    background: var(--paper);
+    display: flex; flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .inspector-content {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .insp-head {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .insp-eyebrow {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .insp-eyebrow b { color: var(--ink); font-weight: 500; }
+  .insp-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0 0 8px;
+    font-variation-settings: "opsz" 36, "SOFT" 40;
+  }
+  .insp-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .insp-sub b { color: var(--ink); font-weight: 500; }
+
+  .insp-body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 16px 18px 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .field {
+    margin-bottom: 18px;
+  }
+  .field .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .field .val {
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .field .val.mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bone-2);
+    padding: 8px 10px;
+    border: 1px solid var(--hair);
+    color: var(--ink-2);
+  }
+  .field .val.prompt {
+    font-family: var(--serif);
+    font-size: 15px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    font-variation-settings: "opsz" 36, "SOFT" 50;
+    color: var(--ink);
+    border-left: 2px solid var(--workflow);
+    padding: 4px 0 4px 12px;
+  }
+  .field .val.prompt.harness { border-color: var(--harness); }
+  .model-select-combo {
+    position: relative;
+  }
+  .model-select-input {
+    width: 100%;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .model-select-menu {
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .model-select-menu[hidden] { display: none; }
+  .model-select-option {
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--hair-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.3;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+  .model-select-option:hover,
+  .model-select-option.active {
+    background: var(--ink);
+    color: var(--bone);
+  }
+  .output-box {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 280px;
+    overflow: auto;
+  }
+  .output-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+  .explain-box {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--ink-2);
+    margin-bottom: 14px;
+  }
+  .explain-box b { color: var(--ink); font-weight: 600; }
+  .source-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--workflow);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  /* timeline */
+  .timeline {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .tl-row {
+    display: grid;
+    grid-template-columns: 44px 70px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 10px;
+    border-bottom: 1px dashed var(--hair);
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-row .step {
+    color: var(--workflow);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+  .tl-row.harness .step { color: var(--harness); }
+  .tl-row .ts { color: var(--muted); font-size: 10.5px; }
+  .tl-row .what { color: var(--ink); }
+  .tl-row .what .tool {
+    color: var(--workflow);
+  }
+  .tl-row.harness .what .tool { color: var(--harness); }
+  .tl-row .what .arg {
+    color: var(--ink-2);
+  }
+  .tl-row .what .v { color: var(--ok); }
+
+  /* timeline collapse */
+  .tl-row.tl-gap {
+    background: var(--bone-3);
+  }
+  .tl-row.tl-gap .step { color: var(--muted); }
+  .tl-row.tl-gap .ts   { color: var(--muted); }
+  .tl-expand-btn, .tl-collapse-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--workflow);
+    cursor: pointer;
+  }
+  .tl-row.harness .tl-expand-btn,
+  .tl-row.harness .tl-collapse-btn { color: var(--harness); }
+  .tl-expand-btn:hover, .tl-collapse-btn:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+
+  .empty-state {
+    padding: 40px 18px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty-state .e-glyph {
+    width: 48px; height: 48px;
+    border: 1px dashed var(--hair);
+    border-radius: 50%;
+    display: inline-block;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .empty-state .e-glyph::after {
+    content: "?"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 22px; font-style: italic;
+    color: var(--muted);
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 18px 32px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid var(--hair);
+  }
+  footer a { color: inherit; text-decoration: none; border-bottom: 1px dashed var(--hair); }
+  footer a:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* edge labels */
+  .edge-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    fill: var(--muted);
+    paint-order: stroke;
+    stroke: var(--bone);
+    stroke-width: 4px;
+  }
+
+  .output-view-btn {
+    margin-top: 10px;
+    border: 1px solid var(--workflow);
+    background: transparent;
+    color: var(--workflow);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    cursor: pointer;
+  }
+  .output-view-btn:hover { background: var(--workflow); color: var(--bone); }
+  .output-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(17,17,16,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 44px;
+  }
+  .output-modal-backdrop[hidden] { display: none; }
+  .output-modal {
+    width: min(980px, 92vw);
+    max-height: 86vh;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    box-shadow: 8px 8px 0 var(--ink);
+    display: flex;
+    flex-direction: column;
+  }
+  .output-modal-head {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .output-modal-title { font-family: var(--serif); font-size: 22px; }
+  .output-modal-actions { display: flex; gap: 8px; }
+  .output-modal-body {
+    padding: 20px 24px;
+    overflow: auto;
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .output-markdown {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  .output-markdown pre {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bone-2);
+    border: 1px solid var(--hair);
+    padding: 12px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .output-raw {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    background: var(--bone-2);
+    border: 1px solid var(--hair);
+    padding: 12px;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .output-raw pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  ::selection { background: var(--workflow); color: var(--bone); }
+
+  @media (max-width: 1100px) {
+    .workspace { grid-template-columns: 1fr; }
+    .canvas-wrap { border-right: none; border-bottom: 1px solid var(--hair); }
+    .inspector { min-height: 480px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <!-- Top bar -->
+  <header class="top">
+    <div class="wordmark">
+      <span class="glyph"></span>
+      <span>custom-harness</span>
+    </div>
+    <nav class="nav-center">
+      <a href="#" class="active">Console</a>
+      <a href="#">Runs</a>
+      <a href="#">Agents</a>
+      <a href="#">Schema</a>
+      <a href="#">Docs</a>
+    </nav>
+    <div class="meta-right">
+      <span>v0.1.0</span>
+      <span class="pill"><span class="dot"></span>READY</span>
+    </div>
+  </header>
+
+  <!-- Goal strip -->
+  <section class="goal-strip">
+    <div class="strip-label">
+      <span class="num" id="inputStepLabel">00 / Goal</span>
+      <span id="inputHelpLabel">What outcome do you want?</span>
+    </div>
+    <textarea class="goal-edit" id="goalInput" rows="2">Audit AGENTS.md and README.md for stale references and propose a unified rewrite.</textarea>
+    <div class="goal-row">
+      <div class="goal-actions">
+        <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
+        <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
+        <button class="btn ghost" id="runWorkflowBtn" disabled title="Start a full Smithers run from the selected workflow file">Start Full Run</button>
+        <button class="btn ghost" id="cancelWorkflowRunBtn" disabled title="Cancel the active Smithers project run">Stop Run</button>
+        <button class="btn ghost" id="editSourceBtn" disabled title="Edit the selected .smithers/workflows/*.tsx file">Edit Source (.tsx)</button>
+        <button class="btn ghost" id="resetBtn">Reset</button>
+        <span class="run-action-status" id="runActionStatus"></span>
+      </div>
+      <div class="sample-bar">
+        <span style="margin-right: 4px;">Demos</span>
+        <button class="sample-btn active" data-sample="audit">Audit (workflow)</button>
+        <button class="sample-btn" data-sample="checks">Checks (parallel)</button>
+        <button class="sample-btn" data-sample="version">Version flag (harness)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Plan strip -->
+  <section class="plan-strip" id="planStrip">
+    <div class="plan-cell">
+      <div class="k">01 / Planner decision</div>
+      <div class="v">
+        <span class="path" id="pathPill">workflow</span>
+        <span class="prov demo" id="provBadge">demo</span>
+      </div>
+    </div>
+    <div class="plan-cell reason">
+      <div class="k">Reason</div>
+      <div class="v" id="planReason">Multiple distinct phases — independent file scans then synthesis — benefits from durable checkpointing.</div>
+    </div>
+    <div class="plan-meta">
+      <div>plan latency <b id="planLatency">412ms</b></div>
+      <div>plan tokens <b id="planTokens">1,287</b></div>
+      <div>run id <b id="runId">a3f2-bb18-91c0</b></div>
+      <div class="fork-of" id="forkOfRow" hidden>fork of <button type="button" class="fork-of-link" id="forkOfLink"></button></div>
+      <div class="forks" id="forksRow" hidden>forks <span class="forks-list" id="forksList"></span></div>
+    </div>
+  </section>
+
+  <!-- Workspace: DAG canvas + Inspector -->
+  <section class="workspace">
+
+    <div class="canvas-wrap">
+      <div class="canvas-head">
+        <div class="left">
+          <span>02 / Execution graph · <b id="execTitle">Audit Pipeline</b></span>
+        </div>
+        <div class="legend">
+          <span class="swatch"><i style="border-color:var(--ink);background:var(--ink)"></i><span>goal</span></span>
+          <span class="swatch"><i style="border-color:var(--rule);background:var(--bone-2)"></i><span>planner</span></span>
+          <span class="swatch"><i style="border-color:var(--workflow);background:rgba(29,60,255,0.1)"></i><span>task · running</span></span>
+          <span class="swatch"><i style="border-color:var(--ok);background:rgba(44,122,63,0.12)"></i><span>done</span></span>
+          <span class="swatch"><i style="border-color:var(--harness);background:rgba(216,84,61,0.12)"></i><span>failed</span></span>
+        </div>
+      </div>
+      <div class="canvas" id="canvas">
+        <div class="canvas-inner" id="canvasInner">
+          <svg class="canvas-svg" id="canvasSvg" viewBox="0 0 1080 920"></svg>
+          <!-- nodes injected here -->
+        </div>
+      </div>
+    </div>
+
+    <aside class="inspector" id="inspector">
+      <div class="inspector-runs empty" id="runsBar">
+        <span class="inspector-runs-label">Runs</span>
+        <select class="inspector-runs-select" id="runsSelect" aria-label="Select run"></select>
+        <button class="fork-lineage" id="forkLineage" hidden type="button" title="Open the parent run"></button>
+      </div>
+      <div class="inspector-content" id="inspectorContent">
+        <!-- inspector content injected -->
+      </div>
+    </aside>
+
+  </section>
+
+  <div class="output-modal-backdrop" id="outputModalBackdrop" hidden>
+    <div class="output-modal" role="dialog" aria-modal="true" aria-labelledby="outputModalTitle">
+      <div class="output-modal-head">
+        <div>
+          <div class="output-meta" id="outputModalMeta">Smithers output</div>
+          <div class="output-modal-title" id="outputModalTitle">Output</div>
+        </div>
+        <div class="output-modal-actions">
+          <button class="btn ghost" id="copyOutputBtn">Copy Markdown</button>
+          <button class="btn ghost" id="closeOutputBtn">Close</button>
+        </div>
+      </div>
+      <div class="output-modal-body" id="outputModalBody"></div>
+    </div>
+  </div>
+
+  <footer>
+    <div>custom-harness · prototype · 2026</div>
+    <div>smithers · openrouter · claude-sonnet-4-6</div>
+  </footer>
+
+</div>
+
+<script>
+  // ============ Sample data: each sample is a complete run plan + node activity ============
+
+  const SAMPLES = {
+    audit: {
+      goal: "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+      path: "workflow",
+      reason: "Multiple distinct phases — independent file scans then synthesis — benefits from durable checkpointing.",
+      latency: "412ms", tokens: "1,287", runId: "a3f2-bb18-91c0",
+      title: "Audit Pipeline",
+      nodes: [
+        { id: "goal",    type: "goal",    title: "User goal",         x: 380, y: 30,
+          agent: "user",
+          prompt: "Audit AGENTS.md and README.md for stale references and propose a unified rewrite.",
+          tools: [], status: "done",
+          timeline: [
+            { ts: "14:23:00", what: "submitted" },
+          ]
+        },
+        { id: "plan",    type: "planner", title: "Planner",           x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal as harness (single Smithers CLI-agent task) or workflow (Smithers DAG). For workflow, define a tree of task / sequence / parallel nodes.",
+          tools: ["zod","generateObject"], status: "done",
+          timeline: [
+            { ts: "14:23:00", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:23:01", what: "decision = workflow" },
+            { ts: "14:23:01", what: "tree: sequence([parallel(scan-3), synthesize])" },
+          ]
+        },
+        { id: "scan-1",  type: "task",    title: "Audit AGENTS.md",   x: 80,  y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read AGENTS.md. List outdated tool references, unclear constraints, and statements that no longer match the current code in src/.",
+          tools: ["read_file","bash"], status: "done", duration: "2.3s",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "AGENTS.md" },
+            { ts: "14:23:05", tool: "bash", arg: "rg -l 'smithers' src/" },
+            { ts: "14:23:06", what: "output · 412 chars · ‘mentions outdated `done` tool semantics’" },
+            { ts: "14:23:06", what: "checkpoint↓ smithers.db" },
+          ]
+        },
+        { id: "scan-2",  type: "task",    title: "Audit README.md",   x: 380, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read README.md. Flag typos, drift from current behavior, and gaps in setup or usage instructions.",
+          tools: ["read_file"], status: "done", duration: "1.8s",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "README.md" },
+            { ts: "14:23:07", what: "output · 287 chars · ‘intro paragraph has 4 typos’" },
+            { ts: "14:23:07", what: "checkpoint↓ smithers.db" },
+          ]
+        },
+        { id: "scan-3",  type: "task",    title: "Inventory deps",    x: 680, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read package.json. List dependencies with versions and any unused or out-of-date entries.",
+          tools: ["read_file","bash"], status: "running",
+          timeline: [
+            { ts: "14:23:03", tool: "agent.init" },
+            { ts: "14:23:04", tool: "read_file", arg: "package.json" },
+            { ts: "14:23:08", tool: "bash", arg: "bun outdated" },
+          ]
+        },
+        { id: "synth",   type: "task",    title: "Propose unified rewrite", x: 380, y: 720,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Combine the three scan outputs into a single proposal. Produce a unified outline, a target voice, and a concrete diff plan listing files to update.",
+          tools: ["write_file"], status: "idle",
+          timeline: [
+            { ts: "14:23:09", what: "queued · awaits scan-1, scan-2, scan-3" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal",   to: "plan",   label: "" },
+        { from: "plan",   to: "scan-1", label: "parallel" },
+        { from: "plan",   to: "scan-2", label: "" },
+        { from: "plan",   to: "scan-3", label: "" },
+        { from: "scan-1", to: "synth",  label: "" },
+        { from: "scan-2", to: "synth",  label: "" },
+        { from: "scan-3", to: "synth",  label: "barrier" },
+      ],
+      defaultSelected: "scan-1",
+    },
+
+    checks: {
+      goal: "Run typecheck, tests, and lint — then summarize.",
+      path: "workflow",
+      reason: "Three independent checks fan out in parallel, then converge into a summary task.",
+      latency: "356ms", tokens: "1,041", runId: "e8d4-7711-0fa2",
+      title: "Pre-commit Checks",
+      nodes: [
+        { id: "goal", type: "goal", title: "User goal", x: 380, y: 30,
+          agent: "user",
+          prompt: "Run typecheck, tests, and lint — then summarize.",
+          tools: [], status: "done",
+          timeline: [{ ts: "14:42:00", what: "submitted" }]
+        },
+        { id: "plan", type: "planner", title: "Planner", x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal. Three independent checks → parallel; followed by a summary → sequence.",
+          tools: ["generateObject"], status: "done",
+          timeline: [
+            { ts: "14:42:00", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:42:01", what: "decision = workflow" },
+            { ts: "14:42:01", what: "tree: sequence([parallel(typecheck, tests, lint), summarize])" },
+          ]
+        },
+        { id: "tc", type: "task", title: "Typecheck", x: 80, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run `bun tsc --noEmit` and report errors with file:line.",
+          tools: ["bash"], status: "done", duration: "3.1s",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun tsc --noEmit" },
+            { ts: "14:42:04", what: "exit=0 · 0 errors" },
+          ]
+        },
+        { id: "tt", type: "task", title: "Tests", x: 380, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run `bun test tests/` and report pass / fail counts and any failing test names.",
+          tools: ["bash"], status: "done", duration: "4.2s",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun test tests/" },
+            { ts: "14:42:05", what: "exit=0 · 14 passed" },
+          ]
+        },
+        { id: "ln", type: "task", title: "Lint", x: 680, y: 480,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Run lint over src/ and report any rule violations.",
+          tools: ["bash"], status: "running",
+          timeline: [
+            { ts: "14:42:01", tool: "bash", arg: "bun eslint src" },
+          ]
+        },
+        { id: "sum", type: "task", title: "Summarize", x: 380, y: 720,
+          agent: "smithers · OpenAIAgent",
+          prompt: "Read the three reports above. Produce a one-paragraph summary highlighting any blocking issues.",
+          tools: [], status: "idle",
+          timeline: [
+            { ts: "14:42:06", what: "queued · awaits all checks" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal", to: "plan", label: "" },
+        { from: "plan", to: "tc",   label: "parallel" },
+        { from: "plan", to: "tt",   label: "" },
+        { from: "plan", to: "ln",   label: "" },
+        { from: "tc",   to: "sum",  label: "" },
+        { from: "tt",   to: "sum",  label: "" },
+        { from: "ln",   to: "sum",  label: "barrier" },
+      ],
+      defaultSelected: "ln",
+    },
+
+    version: {
+      goal: "Add a --version flag to the CLI.",
+      path: "harness",
+      reason: "Single, focused code change. One agent loop is sufficient.",
+      latency: "287ms", tokens: "964", runId: "b7c1-04ee-2a55",
+      title: "Smithers CLI Task",
+      nodes: [
+        { id: "goal", type: "goal", title: "User goal", x: 380, y: 30,
+          agent: "user",
+          prompt: "Add a --version flag to the CLI.",
+          tools: [], status: "done",
+          timeline: [{ ts: "14:31:08", what: "submitted" }]
+        },
+        { id: "plan", type: "planner", title: "Planner", x: 380, y: 230,
+          agent: "generateObject · planSchema",
+          prompt: "Classify the goal. Tight, well-scoped change → harness path; run one Smithers CLI-agent task with node id worker.",
+          tools: ["generateObject"], status: "done",
+          timeline: [
+            { ts: "14:31:08", tool: "generateObject", arg: "planSchema" },
+            { ts: "14:31:09", what: "decision = harness" },
+            { ts: "14:31:09", what: "spawn: smithers · Task(id=worker, agent=CLI)" },
+          ],
+          decision: "harness",
+        },
+        { id: "worker", type: "harness-worker", title: "Worker · Smithers CLI task",
+          x: 380, y: 480,
+          agent: "smithers · CLI AgentLike",
+          prompt: "You are an expert at accomplishing goals. Read the goal, break into steps, execute, verify, then call done. Goal: Add a --version flag to the CLI.",
+          tools: ["read_file","write_file","bash","done"], status: "running",
+          timeline: [
+            { ts: "14:31:09", tool: "agent.init", arg: "model=claude-sonnet-4-6" },
+            { ts: "14:31:10", tool: "read_file", arg: "src/index.ts" },
+            { ts: "14:31:11", tool: "read_file", arg: "package.json" },
+            { ts: "14:31:13", tool: "write_file", arg: "src/index.ts (+9 −1)" },
+            { ts: "14:31:14", tool: "bash", arg: "bun src/index.ts --version" },
+            { ts: "14:31:14", what: "stdout = 0.1.0" },
+            { ts: "14:31:15", tool: "done", arg: "added --version flag" },
+          ]
+        },
+      ],
+      edges: [
+        { from: "goal",   to: "plan",   label: "" },
+        { from: "plan",   to: "worker", label: "harness" },
+      ],
+      defaultSelected: "worker",
+    },
+  };
+
+  // ============ Render ============
+
+  const canvasInner = document.getElementById("canvasInner");
+  const canvasSvg   = document.getElementById("canvasSvg");
+  const inspector   = document.getElementById("inspectorContent");
+  const runsSelect  = document.getElementById("runsSelect");
+  const goalInput   = document.getElementById("goalInput");
+  const inputStepLabel = document.getElementById("inputStepLabel");
+  const inputHelpLabel = document.getElementById("inputHelpLabel");
+  const pathPill    = document.getElementById("pathPill");
+  const planReason  = document.getElementById("planReason");
+  const planLatency = document.getElementById("planLatency");
+  const planTokens  = document.getElementById("planTokens");
+  const runIdEl     = document.getElementById("runId");
+  const execTitle   = document.getElementById("execTitle");
+  const planBtn     = document.getElementById("planBtn");
+  const rerunBtn    = document.getElementById("rerunBtn");
+  const runWorkflowBtn = document.getElementById("runWorkflowBtn");
+  const cancelWorkflowRunBtn = document.getElementById("cancelWorkflowRunBtn");
+  const editSourceBtn = document.getElementById("editSourceBtn");
+  const resetBtn    = document.getElementById("resetBtn");
+  const runActionStatus = document.getElementById("runActionStatus");
+  const outputModalBackdrop = document.getElementById("outputModalBackdrop");
+  const outputModalTitle = document.getElementById("outputModalTitle");
+  const outputModalMeta = document.getElementById("outputModalMeta");
+  const outputModalBody = document.getElementById("outputModalBody");
+  const copyOutputBtn = document.getElementById("copyOutputBtn");
+  const closeOutputBtn = document.getElementById("closeOutputBtn");
+  const sampleBtns  = document.querySelectorAll(".sample-btn");
+
+  let currentSample = "audit";
+  let selectedId = null;
+  let currentRunId = null;
+  let currentProject = null;
+  let currentWorkflowId = null;
+  let currentWorkflowGraph = null;
+  let currentWorkflowSource = null;
+  let projectModeAvailable = false;
+  const projectNodeOutputs = new Map();
+  const projectNodeOutputTables = new Map();
+  let currentOutputMarkdown = "";
+  // currentRunMeta is null for demos. Real runs populate it from run.json + plan.raw.
+  let currentRunMeta = null;
+  // Per-run drafts of edited Task prompts. Keyed by runId, then by nodeId.
+  // Survives navigating away and coming back to the same run.
+  const promptDrafts = new Map();
+  // Per-run baselines (the prompt rendered by the .tsx for each node) so we can
+  // tell whether a textarea value is actually "edited" relative to the run.
+  const promptBaselines = new Map();
+  let studioInspectorHelperPromise = null;
+  let workflowRunUiHelperPromise = null;
+  let smithersRunOverlayHelperPromise = null;
+  let projectLiveStateHelperPromise = null;
+  let runRefreshTimer = null;
+  let projectRunInspection = null;
+  let projectRunInspectionSeq = 0;
+
+  const NODE_W = 280;
+  const NODE_H = 158; // approx — actual height varies, layout tolerates
+
+  function nodeHeightById(id) {
+    const el = document.getElementById("node-" + id);
+    return el ? el.offsetHeight : NODE_H;
+  }
+
+  function renderNodes(sample) {
+    // clear
+    [...canvasInner.querySelectorAll(".node")].forEach(n => n.remove());
+
+    sample.nodes.forEach(n => {
+      const el = document.createElement("div");
+      const isHarness = n.type === "harness-worker" || (sample.path === "harness" && n.type === "task");
+      const isGoal    = n.type === "goal";
+      const isPlanner = n.type === "planner";
+      el.className = [
+        "node",
+        isGoal ? "goal-node" : "",
+        isPlanner ? "planner-node" : "",
+        n.decision === "harness" ? "harness-decision" : "",
+        isHarness ? "harness-node" : "",
+        n.status,
+      ].filter(Boolean).join(" ");
+      el.id = "node-" + n.id;
+      el.style.left = n.x + "px";
+      el.style.top  = n.y + "px";
+
+      const typeLabel = isGoal ? "Goal" :
+                        isPlanner ? "Planner" :
+                        isHarness ? "Harness · Smithers" :
+                        "Task";
+      const stepBadge = isGoal ? "·" : isPlanner ? "01" :
+                        isHarness ? "H" :
+                        ("0" + (sample.nodes.filter(x => x.type === "task" || x.type === "harness-worker").indexOf(n) + 1)).slice(-2);
+
+      const statusText = n.status === "done"    ? `done${n.duration ? " · " + n.duration : ""}` :
+                         n.status === "running" ? "running"
+                       : n.status === "failed"  ? "failed"
+                       : n.status === "succeeded-with-unverified-change" ? "unverified"
+                                                : "pending";
+
+      el.innerHTML = `
+        <div class="node-head">
+          <span class="type"><b>${typeLabel}</b><span style="opacity:.5">${stepBadge}</span></span>
+          <span class="status">${statusText}</span>
+        </div>
+        <div class="node-body">
+          <div class="node-title">${n.title}</div>
+          <div class="node-agent">${n.agent}</div>
+          <div class="node-prompt">${n.prompt}</div>
+          ${n.tools && n.tools.length ? `
+            <div class="node-tools">
+              ${n.tools.map(t => `<span class="tool-chip ${n.status==='running'?'active':''}">${t}</span>`).join("")}
+            </div>
+          ` : ""}
+          ${outputRowForNode(n) ? `<button class="output-view-btn" data-output-node="${escapeHtml(n.id)}" type="button">View output</button>` : ""}
+        </div>
+        <div class="node-bar"><i></i></div>
+      `;
+      el.querySelector(".output-view-btn")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openOutputViewer(n.id);
+      });
+      el.addEventListener("click", () => selectNode(n.id));
+      canvasInner.appendChild(el);
+    });
+  }
+
+  function renderEdges(sample) {
+    canvasSvg.innerHTML = `
+      <defs>
+        <marker id="arrow"  viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1B1A17"/>
+        </marker>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1D3CFF"/>
+        </marker>
+        <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#D8543D"/>
+        </marker>
+      </defs>
+    `;
+
+    sample.edges.forEach(e => {
+      const a = sample.nodes.find(n => n.id === e.from);
+      const b = sample.nodes.find(n => n.id === e.to);
+      if (!a || !b) return;
+
+      const ah = nodeHeightById(a.id);
+      const x1 = a.x + NODE_W / 2;
+      const y1 = a.y + ah;
+      const x2 = b.x + NODE_W / 2;
+      const y2 = b.y;
+
+      // bezier vertical curve
+      const dy = y2 - y1;
+      const cy1 = y1 + dy * 0.45;
+      const cy2 = y2 - dy * 0.45;
+
+      // color: blue if either endpoint is running/done in workflow path; orange for harness link
+      const targetNode = b;
+      const sourceNode = a;
+      const isHarnessEdge = sourceNode.decision === "harness" || targetNode.type === "harness-worker";
+      const stroke = isHarnessEdge ? "#D8543D"
+                   : (targetNode.status === "done" || targetNode.status === "running")
+                     ? "#1D3CFF" : "#1B1A17";
+      const dash   = (targetNode.status === "idle" && !isHarnessEdge) ? "4 4" : "none";
+      const opacity = (targetNode.status === "idle") ? 0.45 : 1;
+      const arrow  = isHarnessEdge ? "url(#arrow-orange)"
+                   : stroke === "#1D3CFF" ? "url(#arrow-blue)" : "url(#arrow)";
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${cy1}, ${x2} ${cy2}, ${x2} ${y2 - 4}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", stroke);
+      path.setAttribute("stroke-width", "1.5");
+      path.setAttribute("stroke-dasharray", dash);
+      path.setAttribute("opacity", opacity);
+      path.setAttribute("marker-end", arrow);
+      canvasSvg.appendChild(path);
+
+      if (e.label) {
+        const lx = (x1 + x2) / 2;
+        const ly = (y1 + y2) / 2;
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", lx);
+        text.setAttribute("y", ly);
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("class", "edge-label");
+        text.textContent = e.label;
+        canvasSvg.appendChild(text);
+      }
+    });
+  }
+
+  function outputRowForNode(node) {
+    const detail = liveSmithersDetail();
+    if (!node || !detail || !Array.isArray(detail.outputs)) return null;
+    const smithersNodeId = node.smithers?.nodeId || node.id;
+    return detail.outputs.find(output => output.nodeId === smithersNodeId || output.nodeId === node.id) || null;
+  }
+
+  function selectedNodeGraph() {
+    return SAMPLES[currentSample]?.nodes?.find(node => node.id === selectedId) || null;
+  }
+
+  function markdownFromOutputRow(output) {
+    const row = output?.row;
+    if (!row || typeof row !== "object") return "";
+    for (const key of ["markdown", "text", "response", "result"]) {
+      if (typeof row[key] === "string") return row[key];
+    }
+    const parsed = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (["run_id", "node_id", "iteration"].includes(key)) continue;
+      parsed[key] = parseOutputValue(value);
+    }
+    const parts = [];
+    if (parsed.title) parts.push(`# ${parsed.title}`);
+    if (parsed.author) parts.push(`**Author:** ${parsed.author}`);
+    if (parsed.summary) parts.push(`## Summary\n\n${parsed.summary}`);
+    if (parsed.objective) parts.push(`## Objective\n\n${parsed.objective}`);
+    for (const [key, title] of [["constraints", "Constraints"], ["openQuestions", "Open Questions"], ["steps", "Steps"]]) {
+      if (Array.isArray(parsed[key])) {
+        parts.push(`## ${title}\n\n${parsed[key].map((item, index) => key === "steps" ? `${index + 1}. ${String(item).replace(/^\s*\d+[.)]\s+/, "")}` : `- ${item}`).join("\n")}`);
+      }
+    }
+    if (parsed.rationale) parts.push(`## Rationale\n\n${parsed.rationale}`);
+    if (parts.length) return parts.join("\n\n");
+    return JSON.stringify(parsed, null, 2);
+  }
+
+  function parseOutputValue(value) {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+      try { return JSON.parse(trimmed); } catch { return value; }
+    }
+    return value;
+  }
+
+  function renderMarkdownLite(markdown) {
+    return `<pre>${escapeHtml(markdown)}</pre>`;
+  }
+
+  function openOutputViewer(nodeId) {
+    const node = SAMPLES[currentSample]?.nodes?.find(item => item.id === nodeId);
+    const output = outputRowForNode(node);
+    if (!node || !output) return;
+    const markdown = markdownFromOutputRow(output);
+    currentOutputMarkdown = markdown;
+    outputModalTitle.textContent = `${node.title} output`;
+    outputModalMeta.textContent = `${output.outputTable} · ${output.nodeId} · iteration ${output.iteration}`;
+    outputModalBody.innerHTML = `<div class="output-markdown">${renderMarkdownLite(markdown)}</div><details class="output-raw"><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(output.row, null, 2))}</pre></details>`;
+    outputModalBackdrop.hidden = false;
+  }
+
+  function closeOutputViewer() {
+    outputModalBackdrop.hidden = true;
+    currentOutputMarkdown = "";
+  }
+
+  function selectNode(id) {
+    selectedId = id;
+    [...canvasInner.querySelectorAll(".node")].forEach(n => {
+      n.classList.toggle("selected", n.id === "node-" + id);
+    });
+    renderInspector();
+  }
+
+  // node ids whose full timeline is expanded (otherwise long timelines
+  // render bookends: first HEAD + last TAIL events with a "show all" gap).
+  const expandedNodes = new Set();
+  const TIMELINE_COLLAPSE_AT = 16;
+  const TIMELINE_HEAD = 6;
+  const TIMELINE_TAIL = 6;
+
+  function renderTimelineRow(ev, displayIndex, isHarness) {
+    const stepNum = String(displayIndex).padStart(2, "0");
+    let what;
+    if (ev.tool) {
+      const tool = escapeHtml(ev.tool);
+      const arg  = ev.arg != null ? `<span class="arg">(${escapeHtml(ev.arg)})</span>` : "";
+      what = `<span class="tool">${tool}</span>${arg}`;
+    } else {
+      what = `<span>${escapeHtml(ev.what || "")}</span>`;
+    }
+    return `
+      <div class="tl-row ${isHarness ? "harness" : ""}">
+        <span class="step">${stepNum}</span>
+        <span class="ts">${escapeHtml(ev.ts || "")}</span>
+        <span class="what">${what}</span>
+      </div>`;
+  }
+
+  function buildTimelineHtml(timeline, isHarness, nodeId) {
+    const all = timeline || [];
+    if (all.length === 0) {
+      return `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no activity yet</span></div>`;
+    }
+    const expanded  = expandedNodes.has(nodeId);
+    const collapsed = !expanded && all.length > TIMELINE_COLLAPSE_AT;
+
+    if (!collapsed) {
+      const rows = all.map((ev, i) => renderTimelineRow(ev, i + 1, isHarness));
+      if (expanded && all.length > TIMELINE_COLLAPSE_AT) {
+        rows.push(`<div class="tl-row tl-gap ${isHarness ? "harness" : ""}">
+          <span class="step">⋯</span>
+          <span class="ts">—</span>
+          <span class="what"><button class="tl-collapse-btn" data-node="${escapeHtml(nodeId)}">collapse to first ${TIMELINE_HEAD} + last ${TIMELINE_TAIL}</button></span>
+        </div>`);
+      }
+      return rows.join("");
+    }
+
+    // Collapsed: head + gap + tail
+    const head = all.slice(0, TIMELINE_HEAD);
+    const tail = all.slice(all.length - TIMELINE_TAIL);
+    const hidden = all.length - TIMELINE_HEAD - TIMELINE_TAIL;
+    const headRows = head.map((ev, i) => renderTimelineRow(ev, i + 1, isHarness));
+    const tailRows = tail.map((ev, i) =>
+      renderTimelineRow(ev, all.length - TIMELINE_TAIL + i + 1, isHarness));
+    const gap = `<div class="tl-row tl-gap ${isHarness ? "harness" : ""}">
+      <span class="step">⋯</span>
+      <span class="ts">—</span>
+      <span class="what"><button class="tl-expand-btn" data-node="${escapeHtml(nodeId)}">${hidden} hidden · show all ${all.length}</button></span>
+    </div>`;
+    return headRows.concat(gap, tailRows).join("");
+  }
+
+  function outputArtifactUrl(runId, artifact) {
+    return `/runs/${encodeURIComponent(runId)}/${String(artifact).split("/").map(encodeURIComponent).join("/")}`;
+  }
+
+  function outputFieldHtml(node) {
+    if (!node.outputArtifact && !node.outputPreview) return "";
+    const bytes = typeof node.outputBytes === "number" ? ` · ${formatBytes(node.outputBytes)}` : "";
+    const artifact = node.outputArtifact ? ` · ${escapeHtml(node.outputArtifact)}` : "";
+    const preview = node.outputPreview || "Loading output...";
+    return `
+      <div class="field">
+        <div class="lbl">
+          <span>Agent output</span>
+          <span class="output-meta">${bytes}${artifact}</span>
+        </div>
+        <pre class="output-box" id="nodeOutputBox">${escapeHtml(preview)}</pre>
+      </div>
+    `;
+  }
+
+  async function hydrateNodeOutput(node, selectedAtRender) {
+    if (!node.outputArtifact || !currentRunId) return;
+    const box = document.getElementById("nodeOutputBox");
+    if (!box) return;
+    try {
+      const response = await fetch(outputArtifactUrl(currentRunId, node.outputArtifact), { cache: "no-store" });
+      if (!response.ok) throw new Error(`artifact ${response.status}`);
+      const text = await response.text();
+      if (selectedId === selectedAtRender && document.getElementById("nodeOutputBox") === box) {
+        box.textContent = text;
+      }
+    } catch (err) {
+      if (selectedId === selectedAtRender && document.getElementById("nodeOutputBox") === box) {
+        box.textContent = node.outputPreview || `Could not load output: ${err.message}`;
+      }
+    }
+  }
+
+  function isEditableTask(node) {
+    return node.type === "task"
+      && currentSample === "_live"
+      && currentRunMeta?.isSmithersWorkflow === true;
+  }
+
+  function getPromptBaseline(runId, nodeId) {
+    return promptBaselines.get(runId)?.get(nodeId);
+  }
+
+  function loadStudioInspectorHelper() {
+    if (!studioInspectorHelperPromise) {
+      studioInspectorHelperPromise = import("/src/ui/studioInspector.js");
+    }
+    return studioInspectorHelperPromise;
+  }
+
+  function loadWorkflowRunUiHelper() {
+    if (!workflowRunUiHelperPromise) {
+      workflowRunUiHelperPromise = import("/src/ui/workflowRunUi.js");
+    }
+    return workflowRunUiHelperPromise;
+  }
+
+  function loadSmithersRunOverlayHelper() {
+    if (!smithersRunOverlayHelperPromise) {
+      smithersRunOverlayHelperPromise = import("/src/ui/smithersRunOverlay.js");
+    }
+    return smithersRunOverlayHelperPromise;
+  }
+
+  function loadProjectLiveStateHelper() {
+    if (!projectLiveStateHelperPromise) {
+      projectLiveStateHelperPromise = import("/src/ui/projectLiveState.js");
+    }
+    return projectLiveStateHelperPromise;
+  }
+
+  async function renderProjectGraphForCurrentState({ previewGraph, liveMode = false, liveDetail = null, shouldApply = null }) {
+    const { deriveProjectRenderedGraph } = await loadProjectLiveStateHelper();
+    const decision = deriveProjectRenderedGraph({ previewGraph, liveMode, liveDetail });
+    if (shouldApply && !shouldApply()) return decision;
+    if (decision.mode === "live") {
+      SAMPLES._project = decision.graph;
+      loadSample("_project");
+      setProvenance({ liveSmithers: true, status: decision.provenance.status });
+      return decision;
+    }
+    if (decision.mode === "live-overlay-error") {
+      console.warn("smithers live overlay unavailable", decision.error);
+      SAMPLES._project = decision.graph;
+      loadSample("_project");
+      setProvenance({ liveSmithers: false, status: "preview", notes: decision.error });
+      setRunActionStatus(`Live overlay failed · ${decision.error}`, "error");
+      return decision;
+    }
+    SAMPLES._project = decision.graph;
+    loadSample("_project");
+    return decision;
+  }
+
+  async function renderHistoricalProjectRunGraph(detail) {
+    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: currentWorkflowId });
+    SAMPLES._project = decision.graph;
+    loadSample("_project");
+    if (decision.mode === "historical-frame") {
+      setProvenance({ smithersRunDetail: detail, historicalSmithers: true, graphSource: decision.provenance.graphSource });
+    } else {
+      setProvenance({ historicalUnavailable: true, status: "unavailable", notes: decision.error });
+      setRunActionStatus(`Historical graph unavailable · ${decision.error}`, "error");
+    }
+    return decision;
+  }
+
+  function workflowPathForCurrentProject() {
+    if (!currentWorkflowId) return null;
+    const workflows = currentProject?.workflows;
+    if (!Array.isArray(workflows)) return `.smithers/workflows/${currentWorkflowId}.tsx`;
+    return workflows.find(workflow => workflow?.id === currentWorkflowId)?.path
+      ?? `.smithers/workflows/${currentWorkflowId}.tsx`;
+  }
+
+  function sourceValuesByPathForNode(node) {
+    const editor = node?.smithers?.meta?.editor;
+    if (!editor?.fields || typeof editor.fields !== "object") return {};
+    const values = {};
+    for (const field of Object.values(editor.fields)) {
+      if (!field || !Array.isArray(field.sourcePath)) continue;
+      const key = field.sourcePath.join(".");
+      if (typeof field.value === "string") values[key] = field.value;
+    }
+    return values;
+  }
+
+  function buildFallbackProjectInspectorState(node) {
+    const renderedPromptPreview = {
+      label: "Rendered prompt",
+      value: node.prompt || "",
+      help: "computed from workflow source + preview input",
+    };
+    const canEditSource = Boolean(workflowPathForCurrentProject());
+    return {
+      structuredFields: [],
+      canSaveStructuredEdits: false,
+      canEditSource,
+      renderedPromptPreview,
+      actions: canEditSource ? [{ id: "edit-source", label: "Edit source", visible: true, enabled: true }] : [],
+      visibleCopy: [renderedPromptPreview.label, renderedPromptPreview.value, renderedPromptPreview.help],
+    };
+  }
+
+  function buildProjectInspectorStateSync(node) {
+    return window.__studioInspectorHelper?.buildStudioInspectorState?.({
+      mode: "project-workflow",
+      workflowId: currentWorkflowId || undefined,
+      workflowPath: workflowPathForCurrentProject() || undefined,
+      node,
+      sourceValuesByPath: sourceValuesByPathForNode(node),
+    }) ?? buildFallbackProjectInspectorState(node);
+  }
+
+  function ensureProjectInspectorState(node, selectedAtRender) {
+    if (!currentWorkflowId || !node || window.__studioInspectorHelper) return;
+    loadStudioInspectorHelper()
+      .then(helper => {
+        window.__studioInspectorHelper = helper;
+        if (currentWorkflowId && selectedId === selectedAtRender) renderInspector();
+      })
+      .catch(err => {
+        console.warn("studio inspector helper unavailable", err);
+      });
+  }
+
+  function studioAction(state, id) {
+    return state.actions?.find(action => action.id === id && action.visible);
+  }
+
+  function structuredPromptField(state) {
+    return state.structuredFields?.find(field => field.id === "prompt");
+  }
+
+  let openRouterModelsPromise = null;
+  function loadOpenRouterModels() {
+    if (!openRouterModelsPromise) {
+      openRouterModelsPromise = fetch("/api/openrouter/models", { cache: "no-store" })
+        .then(response => response.json())
+        .then(data => data.ok === false ? [] : (data.models || []))
+        .catch(err => {
+          console.warn("openrouter models unavailable", err);
+          return [];
+        });
+    }
+    return openRouterModelsPromise;
+  }
+
+  function renderProjectStructuredFields(state) {
+    const fields = state.structuredFields || [];
+    if (fields.length === 0) return "";
+    return fields.map(field => {
+      const commonLabel = `<div class="lbl"><span>${escapeHtml(field.label)}</span><span class="output-meta">${escapeHtml(field.destinationLabel)}</span></div>`;
+      if (field.control === "select" || field.kind === "model-select") {
+        return `<div class="field">
+          ${commonLabel}
+          <div class="model-select-combo" data-current-value="${escapeHtml(field.value)}">
+            <input class="model-select-input structured-field" data-field-id="${escapeHtml(field.id)}" data-source-path="${escapeHtml(field.sourcePath.join("."))}" value="${escapeHtml(field.value)}" autocomplete="off" spellcheck="false" placeholder="Search OpenRouter models...">
+            <div class="model-select-menu" hidden></div>
+          </div>
+          <div class="node-edit-note">OpenRouter model for future Smithers runs. Saving writes this value back to workflow source.</div>
+        </div>`;
+      }
+      return `<div class="field">
+        ${commonLabel}
+        <textarea class="val prompt-edit structured-field" data-field-id="${escapeHtml(field.id)}" data-source-path="${escapeHtml(field.sourcePath.join("."))}" rows="7" spellcheck="false">${escapeHtml(field.value)}</textarea>
+        <div class="node-edit-note">Source-backed template value. Saving writes this value back to workflow source.</div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderProjectInspectorBar(state) {
+    const saveAction = studioAction(state, "save-to-workflow");
+    if (!saveAction) return "";
+    const help = saveAction.help ? ` · ${escapeHtml(saveAction.help)}` : "";
+    return `<div class="studio-bar">
+      <span class="studio-status">Structured workflow edit${help}</span>
+      <button class="btn studio-run" id="saveStructuredBtn">${escapeHtml(saveAction.label)} <span class="arrow">→</span></button>
+    </div>`;
+  }
+
+
+  function hydrateModelSelects() {
+    const combos = [...inspector.querySelectorAll('.model-select-combo')];
+    if (combos.length === 0) return;
+    loadOpenRouterModels().then(models => {
+      for (const combo of combos) setupModelCombo(combo, models);
+    });
+  }
+
+  function setupModelCombo(combo, models) {
+    const input = combo.querySelector('.model-select-input');
+    const menu = combo.querySelector('.model-select-menu');
+    if (!input || !menu) return;
+    const render = () => {
+      const query = input.value.trim().toLowerCase();
+      const matches = models
+        .filter(model => model?.id && (!query || `${model.id} ${model.name || ''}`.toLowerCase().includes(query)))
+        .slice(0, 80);
+      menu.innerHTML = matches.length
+        ? matches.map(model => `<div class="model-select-option" data-model-id="${escapeHtml(model.id)}">${escapeHtml(model.name ? `${model.id} · ${model.name}` : model.id)}</div>`).join('')
+        : '<div class="model-select-option">No matching OpenRouter models</div>';
+      menu.hidden = false;
+    };
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') menu.hidden = true;
+    });
+    menu.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('.model-select-option[data-model-id]');
+      if (!option) return;
+      event.preventDefault();
+      input.value = option.dataset.modelId;
+      menu.hidden = true;
+      saveStructuredWorkflowField(input, { refresh: true });
+    });
+    input.addEventListener('blur', () => setTimeout(() => { menu.hidden = true; }, 120));
+  }
+
+  async function saveStructuredWorkflowField(field, { refresh = true } = {}) {
+    if (!currentWorkflowId || !field?.dataset?.sourcePath) return null;
+    const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source-field`, {
+      sourcePath: field.dataset.sourcePath.split('.'),
+      value: field.value,
+    }, 'PUT');
+    if (result.value !== field.value) throw new Error(`Saved value mismatch for ${field.dataset.sourcePath}`);
+    if (refresh) {
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${field.value} · preview re-rendered`, 'ok');
+    }
+    return result;
+  }
+
+  async function saveStructuredWorkflowFields() {
+    if (!currentWorkflowId) return;
+    const fields = [...inspector.querySelectorAll('.structured-field[data-source-path]')];
+    if (fields.length === 0) return;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Saving ${fields.length} workflow field(s)...`);
+    try {
+      for (const field of fields) {
+        await saveStructuredWorkflowField(field, { refresh: false });
+      }
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${fields.length} workflow field(s) · preview re-rendered`, 'ok');
+    } catch (err) {
+      setRunActionStatus(`Structured save failed · ${err.message}`, 'error');
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  function renderProjectPromptPreview(state, isHarness) {
+    const preview = state.renderedPromptPreview;
+    if (!preview) return "";
+    return `<div class="field">
+      <div class="lbl">
+        <span>${escapeHtml(preview.label)}</span>
+        <span class="output-meta">${escapeHtml(preview.help)}</span>
+      </div>
+      <div class="val prompt ${isHarness ? "harness" : ""}">${escapeHtml(preview.value)}</div>
+    </div>`;
+  }
+
+  function renderProjectReadOnlyNote(state) {
+    if (state.structuredFields?.length > 0) return "";
+    return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
+  }
+
+  function isHistoricalRunInspection() {
+    return Boolean(currentWorkflowId && currentRunMeta?.smithersRunDetail && !currentRunMeta?.liveSmithers);
+  }
+
+  function liveSmithersDetail() {
+    return currentRunMeta?.smithersRunDetail ?? null;
+  }
+
+  function latestSmithersNodeForGraphNode(node, detail) {
+    if (!node || !detail || !Array.isArray(detail.nodes)) return null;
+    const smithersNodeId = node.smithers?.nodeId || node.id;
+    return detail.nodes
+      .filter(row => row.nodeId === smithersNodeId || row.nodeId === node.id)
+      .sort((a, b) => (b.iteration ?? 0) - (a.iteration ?? 0) || (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0))[0] || null;
+  }
+
+  function selectedLiveSmithersNodeId(node, detail) {
+    return latestSmithersNodeForGraphNode(node, detail)?.nodeId || node?.smithers?.nodeId || node?.id;
+  }
+
+  function selectedLiveSmithersIteration(node, detail) {
+    const latest = latestSmithersNodeForGraphNode(node, detail);
+    return typeof latest?.iteration === "number" ? latest.iteration : null;
+  }
+
+  function filterLiveRowsForNode(rows, nodeId, iteration) {
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(row => row.nodeId === nodeId && (iteration == null || row.iteration === iteration));
+  }
+
+  function stringifyLiveValue(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+
+  function renderLiveSmithersInspectorSections(node, isHarness) {
+    const detail = liveSmithersDetail();
+    if (!detail) return "";
+    const dbNode = latestSmithersNodeForGraphNode(node, detail);
+    const nodeId = selectedLiveSmithersNodeId(node, detail);
+    const iteration = selectedLiveSmithersIteration(node, detail);
+    const attempts = filterLiveRowsForNode(detail.attempts, nodeId, iteration);
+    const outputs = filterLiveRowsForNode(detail.outputs, nodeId, iteration);
+    const events = Array.isArray(detail.events) ? detail.events.filter(event => event.nodeId === nodeId || event.nodeId == null) : [];
+    const frames = Array.isArray(detail.frames) ? detail.frames : [];
+    const outputHtml = outputs.length === 0
+      ? `<div class="node-edit-note">No Smithers output rows recorded for this node yet.</div>`
+      : outputs.map(output => `<pre class="output-box">${escapeHtml(stringifyLiveValue(output.row))}</pre>`).join("");
+    const attemptRows = attempts.length === 0
+      ? `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no attempts recorded for this node yet</span></div>`
+      : attempts.map((attempt, index) => `<div class="tl-row ${isHarness ? "harness" : ""}">
+          <span class="step">${String(index + 1).padStart(2, "0")}</span>
+          <span class="ts">${escapeHtml(String(attempt.attempt ?? "—"))}</span>
+          <span class="what"><b>${escapeHtml(attempt.status || attempt.state || "unknown")}</b>${attempt.error ? ` · ${escapeHtml(stringifyLiveValue(attempt.error))}` : ""}</span>
+        </div>`).join("");
+    const timelineRows = events.length === 0
+      ? `<div class="tl-row"><span class="step">·</span><span class="ts">—</span><span class="what" style="color:var(--muted)">no DB events in the current polling window</span></div>`
+      : events.map((event, index) => `<div class="tl-row ${isHarness ? "harness" : ""}">
+          <span class="step">${String(index + 1).padStart(2, "0")}</span>
+          <span class="ts">#${escapeHtml(String(event.seq ?? index + 1))}</span>
+          <span class="what">${escapeHtml(event.type || "event")}</span>
+        </div>`).join("");
+    const frameRows = frames.length === 0
+      ? `<div class="node-edit-note">No Smithers frame metadata recorded yet.</div>`
+      : `<div class="val mono">${frames.map(frame => `frame ${frame.frameNo} · mounted ${(frame.mountedTaskIds || []).join(", ") || "—"}${frame.note ? ` · ${frame.note}` : ""}`).map(escapeHtml).join("<br>")}</div>`;
+
+    const historical = isHistoricalRunInspection();
+    const graphSource = detail?.view?.graphSource;
+    const provenance = historical && graphSource?.kind === "smithers-frame"
+      ? `Smithers Run Frame · historical run · ${escapeHtml(graphSource.runId)} · frame ${escapeHtml(graphSource.frameNo)}`
+      : "Smithers SQLite · live run";
+    const provenanceHelp = historical
+      ? "Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph is projected from the selected run's persisted Smithers Run Frame; current Workflow Source was not used as a fallback."
+      : "Run state, attempts, events, frames, and outputs below are read from Smithers SQLite. The graph layout remains the preview projection.";
+
+    return `
+      <div class="explain-box"><b>${provenance}</b><br>${provenanceHelp}</div>
+      <div class="field">
+        <div class="lbl"><span>Smithers run state</span><span class="output-meta">raw status</span></div>
+        <div class="val mono">run ${escapeHtml(detail.run?.runId || currentRunId || "unknown")} · ${escapeHtml(detail.run?.status || "unknown")}<br>node ${escapeHtml(nodeId || node.id)} · ${escapeHtml(dbNode?.status || "not recorded")} · iteration ${escapeHtml(iteration ?? "—")}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Attempts</span><span class="output-meta">DB-backed</span></div>
+        <div class="timeline">${attemptRows}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Run output</span><span class="output-meta">Smithers output rows</span></div>
+        ${outputs.length > 0 ? `<button class="btn ghost" id="viewNodeOutputBtn">View full output</button>` : ""}
+        ${outputHtml}
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Activity timeline</span><span class="output-meta">DB events · ${(events || []).length} shown</span></div>
+        <div class="timeline">${timelineRows}</div>
+      </div>
+      <div class="field">
+        <div class="lbl"><span>Frame summary</span><span class="output-meta">metadata only</span></div>
+        ${frameRows}
+      </div>
+    `;
+  }
+
+  function pretendOutputPlaceholder(node) {
+    const table = node?.smithers?.outputTableName || node?.id;
+    if (table === "concept") {
+      return JSON.stringify({
+        title: "Agentic Electron desktop app",
+        objective: "Build an Electron app with chat plus a canvas where an agent can modify predefined UI components through safe tools.",
+        constraints: ["Use Electron", "Agent edits go through restricted tools"],
+        openQuestions: ["Which UI framework should Electron use?"],
+      }, null, 2);
+    }
+    if (table === "plan") {
+      return JSON.stringify({
+        summary: "Build an Electron desktop app with an agent chat surface and UI-editing canvas.",
+        steps: ["Create the Electron shell", "Define the UI component schema", "Add safe agent tools"],
+      }, null, 2);
+    }
+    if (table === "variant") {
+      return JSON.stringify({
+        author: "Claude Code",
+        summary: "A variant implementation plan.",
+        steps: ["First concrete step", "Second concrete step"],
+        rationale: "Explain how this differs from the primary plan.",
+      }, null, 2);
+    }
+    return '{"value":"..."}';
+  }
+
+  function renderInitialWorkflowPromptEditor(node) {
+    const value = currentProjectInputText();
+    return `<div class="field">
+      <div class="lbl">
+        <span>Initial workflow prompt</span>
+        <span class="output-meta">runtime input · ctx.input.prompt</span>
+      </div>
+      <textarea class="val prompt-edit" id="initialWorkflowPromptArea" rows="7" spellcheck="false" placeholder="Describe what this workflow should handle for this run...">${escapeHtml(value)}</textarea>
+      <div class="node-edit-note">Passed to Smithers as ctx.input.prompt / ctx.input.request. Editing this re-renders prompts for the current workflow; it does not change workflow structure or source.</div>
+    </div>`;
+  }
+
+  function getPromptDraft(runId, nodeId) {
+    return promptDrafts.get(runId)?.get(nodeId);
+  }
+
+  function setPromptDraft(runId, nodeId, value) {
+    let perRun = promptDrafts.get(runId);
+    if (!perRun) {
+      perRun = new Map();
+      promptDrafts.set(runId, perRun);
+    }
+    perRun.set(nodeId, value);
+  }
+
+  function clearPromptDraft(runId, nodeId) {
+    promptDrafts.get(runId)?.delete(nodeId);
+  }
+
+  function pendingOverridesForRun(runId) {
+    const perRun = promptDrafts.get(runId);
+    if (!perRun) return {};
+    const baselines = promptBaselines.get(runId) ?? new Map();
+    const out = {};
+    for (const [nodeId, value] of perRun) {
+      if (value !== baselines.get(nodeId)) out[nodeId] = value;
+    }
+    return out;
+  }
+
+  function pendingOverrideCount(runId) {
+    return Object.keys(pendingOverridesForRun(runId)).length;
+  }
+
+  function activeInspectorTextarea() {
+    const active = document.activeElement;
+    if (!active || !inspector.contains(active) || active.tagName !== "TEXTAREA" || !active.id) return null;
+    return active;
+  }
+
+  function captureInspectorScrollState() {
+    const body = inspector.querySelector(".insp-body");
+    const ta = activeInspectorTextarea();
+    return {
+      bodyScroll: body ? body.scrollTop : 0,
+      activeTextareaId: ta ? ta.id : null,
+      taScroll: ta ? ta.scrollTop : 0,
+      taSelStart: ta ? ta.selectionStart : null,
+      taSelEnd: ta ? ta.selectionEnd : null,
+    };
+  }
+
+  function restoreInspectorScrollState(state) {
+    if (!state) return;
+    const body = inspector.querySelector(".insp-body");
+    if (body) body.scrollTop = state.bodyScroll;
+    const ta = state.activeTextareaId ? inspector.querySelector(`#${CSS.escape(state.activeTextareaId)}`) : null;
+    if (ta) {
+      ta.scrollTop = state.taScroll;
+      ta.focus({ preventScroll: true });
+      if (state.taSelStart != null && state.taSelEnd != null) {
+        try { ta.setSelectionRange(state.taSelStart, state.taSelEnd); } catch {}
+      }
+    }
+  }
+
+  function renderInspector() {
+    const sample = SAMPLES[currentSample];
+    const node   = sample.nodes.find(n => n.id === selectedId);
+    const prevScroll = captureInspectorScrollState();
+    if (!node) {
+      inspector.innerHTML = `
+        <div class="empty-state">
+          <div class="e-glyph"></div>
+          <div>Select a node in the graph<br>to inspect its agent activity.</div>
+        </div>`;
+      return;
+    }
+
+    const isHarness = node.type === "harness-worker" || (sample.path === "harness" && node.type !== "goal" && node.type !== "planner");
+    const isProjectPreview = currentSample === "_project";
+    const typeLabel = node.type === "goal"    ? (isProjectPreview ? "Runtime input" : "Goal · root")
+                    : node.type === "planner" ? "Smithers planner task"
+                    : isHarness               ? "Smithers CLI agent · single task"
+                                              : "Smithers task";
+
+    const tlRows = buildTimelineHtml(node.timeline, isHarness, node.id);
+    const selectedAtRender = node.id;
+    const historicalInspection = isHistoricalRunInspection();
+    const isProjectInputNode = Boolean(currentWorkflowId && node.type === "goal" && !historicalInspection);
+    const isProjectTask = Boolean(currentWorkflowId && node.type === "task");
+    if (isProjectTask && !historicalInspection) ensureProjectInspectorState(node, selectedAtRender);
+    const projectInspectorState = isProjectTask && !historicalInspection ? buildProjectInspectorStateSync(node) : null;
+    const editable = !isProjectTask && isEditableTask(node);
+    const editScopeId = currentRunId || "project";
+    const draft = editable ? getPromptDraft(editScopeId, node.id) : undefined;
+    const baseline = editable ? getPromptBaseline(editScopeId, node.id) ?? node.prompt : node.prompt;
+    const promptValue = draft !== undefined ? draft : baseline;
+    const isEditedHere = editable && draft !== undefined && draft !== baseline;
+    const pendingCount = editable ? pendingOverrideCount(editScopeId) : 0;
+    const studioBarHtml = projectInspectorState
+      ? renderProjectInspectorBar(projectInspectorState)
+      : editable
+        ? `<div class="studio-bar">
+            <span class="studio-status">${pendingCount === 0
+              ? "No edits"
+              : `<b>${pendingCount}</b> edit${pendingCount === 1 ? "" : "s"} pending`}</span>
+            <button class="btn studio-run" id="studioRunBtn"${pendingCount === 0 ? " disabled" : ""}>
+              Run with edits <span class="arrow">→</span>
+            </button>
+          </div>`
+        : "";
+
+    const promptFieldHtml = isProjectInputNode
+      ? renderInitialWorkflowPromptEditor(node)
+      : projectInspectorState
+        ? `${renderProjectStructuredFields(projectInspectorState)}${renderProjectPromptPreview(projectInspectorState, isHarness)}${renderProjectReadOnlyNote(projectInspectorState)}`
+        : editable
+        ? `<div class="field">
+            <div class="lbl">
+              <span>Agent prompt${isEditedHere ? " · <span class='edit-pill'>edited</span>" : ""}</span>
+              ${draft !== undefined && draft !== baseline
+                ? `<button class="prompt-reset" id="promptResetBtn" title="Discard edits to this task">Reset</button>`
+                : ""}
+            </div>
+            <textarea class="val prompt-edit${isEditedHere ? " edited" : ""}" id="promptEditArea" rows="6" spellcheck="false">${escapeHtml(promptValue)}</textarea>
+          </div>`
+        : `<div class="field">
+            <div class="lbl">Agent prompt</div>
+            <div class="val prompt ${isHarness ? "harness" : ""}">${escapeHtml(node.prompt)}</div>
+          </div>`;
+
+    const liveDetail = liveSmithersDetail();
+    const outputDraft = currentWorkflowId && node.type === "task" ? projectNodeOutputs.get(node.id) : undefined;
+    const outputEditor = currentWorkflowId && node.type === "task"
+      ? liveDetail
+        ? `<div class="field">
+            <div class="lbl">Pretend this node output is</div>
+            <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="5" spellcheck="false" disabled placeholder="${escapeHtml(pretendOutputPlaceholder(node))}"></textarea>
+            <div class="node-edit-note">Preview graph output is not live Smithers run state.</div>
+            <button class="btn studio-run" id="applyNodeOutputBtn" disabled>Preview-only while inspecting live run <span class="arrow">→</span></button>
+          </div>`
+        : `<div class="field">
+            <div class="lbl">Pretend this node output is</div>
+            <textarea class="val prompt-edit" id="nodeOutputEditArea" rows="7" spellcheck="false" placeholder="${escapeHtml(pretendOutputPlaceholder(node))}">${escapeHtml(outputDraft ? JSON.stringify(outputDraft, null, 2) : "")}</textarea>
+            <div class="node-edit-note">Paste pretend JSON output for this task to preview downstream prompts. This does not run the task and does not write Smithers run state.</div>
+            <button class="btn studio-run" id="applyNodeOutputBtn">Apply pretend output to downstream preview <span class="arrow">→</span></button>
+            ${outputDraft ? `<button class="prompt-reset" id="clearNodeOutputBtn">Clear pretend output</button>` : ""}
+          </div>`
+      : "";
+    const sourceExplanation = currentWorkflowId
+      ? historicalInspection
+        ? `<div class="explain-box">
+            <b>Historical Run Inspection:</b><br>
+            The graph is projected from the selected run's persisted Smithers Run Frame. Smithers SQLite rows below are run state for this historical run. Current Workflow Source is only for previewing/editing future runs and is not used as a graph fallback here.
+          </div>`
+        : `<div class="explain-box">
+            <b>How to read this:</b><br>
+            <b>Input</b> renders prompts. <b>Pretend output</b> lets downstream nodes preview as if this node already produced a value. <b>Source</b> defines nodes, agents, and dependencies. This preview is not live run state.<br>
+            <button class="source-link-btn" id="sourceLinkBtn">Edit source for workflow ${escapeHtml(currentWorkflowId)}</button>
+          </div>`
+      : "";
+    const liveSmithersSections = node.type === "task" ? renderLiveSmithersInspectorSections(node, isHarness) : "";
+    const legacyOutputHtml = liveDetail ? "" : outputFieldHtml(node);
+    const legacyTimelineSection = liveDetail && node.type === "task" ? "" : `
+        <div class="field">
+          <div class="lbl">
+            <span>Activity timeline</span>
+            <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:10px">${(node.timeline || []).length} events</span>
+          </div>
+          <div class="timeline">${tlRows}</div>
+        </div>`;
+
+    inspector.innerHTML = `
+      <div class="insp-head">
+        <div class="insp-eyebrow">
+          <span><b>${typeLabel}</b></span>
+          <span>${node.status}</span>
+        </div>
+        <h3 class="insp-title">${node.title}</h3>
+        <div class="insp-sub">id <b>${node.id}</b> · agent <b>${node.agent}</b>${node.duration ? ` · <b>${node.duration}</b>` : ""}</div>
+      </div>
+      <div class="insp-body">
+        ${sourceExplanation}
+        ${studioBarHtml}
+        ${promptFieldHtml}
+        ${outputEditor}
+        ${liveSmithersSections}
+        ${node.tools && node.tools.length ? `
+          <div class="field">
+            <div class="lbl">Tools available</div>
+            <div class="val mono">${node.tools.join(", ")}</div>
+          </div>
+        ` : ""}
+        ${legacyOutputHtml}
+        ${legacyTimelineSection}
+      </div>
+    `;
+
+    if (!historicalInspection) inspector.querySelector("#sourceLinkBtn")?.addEventListener("click", openWorkflowSourceEditor);
+    inspector.querySelector("#saveStructuredBtn")?.addEventListener("click", saveStructuredWorkflowFields);
+    hydrateModelSelects();
+    inspector.querySelector("#initialWorkflowPromptArea")?.addEventListener("input", (event) => {
+      goalInput.value = event.target.value;
+      saveStoredProjectInput(currentWorkflowId, event.target.value);
+      clearTimeout(projectInputRefreshTimer);
+      projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
+    });
+    inspector.querySelector("#applyNodeOutputBtn")?.addEventListener("click", async () => {
+      if (currentRunMeta?.liveSmithers) {
+        setRunActionStatus("Pretend output is preview-only while inspecting a live Smithers run", "error");
+        return;
+      }
+      const area = inspector.querySelector("#nodeOutputEditArea");
+      if (!area || !selectedId) return;
+      const text = area.value.trim();
+      if (!text) {
+        setRunActionStatus("Enter pretend output JSON before applying", "error");
+        area.focus({ preventScroll: true });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(text);
+        projectNodeOutputs.set(selectedId, parsed);
+        await refreshProjectGraphFromInput();
+        setRunActionStatus(`Applied pretend output for ${selectedId}`, "ok");
+      } catch (err) {
+        setRunActionStatus(`Output must be JSON · ${err.message}`, "error");
+      }
+    });
+    inspector.querySelector("#viewNodeOutputBtn")?.addEventListener("click", () => {
+      if (selectedId) openOutputViewer(selectedId);
+    });
+    inspector.querySelector("#clearNodeOutputBtn")?.addEventListener("click", async () => {
+      if (currentRunMeta?.liveSmithers) {
+        setRunActionStatus("Pretend output is preview-only while inspecting a live Smithers run", "error");
+        return;
+      }
+      if (!selectedId) return;
+      projectNodeOutputs.delete(selectedId);
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Cleared pretend output for ${selectedId}`, "ok");
+    });
+
+    inspector.querySelectorAll(".tl-expand-btn").forEach(b =>
+      b.addEventListener("click", () => {
+        expandedNodes.add(b.dataset.node);
+        renderInspector();
+      }));
+    inspector.querySelectorAll(".tl-collapse-btn").forEach(b =>
+      b.addEventListener("click", () => {
+        expandedNodes.delete(b.dataset.node);
+        renderInspector();
+      }));
+
+    if (editable) {
+      const ta = inspector.querySelector("#promptEditArea");
+      if (ta) {
+        ta.addEventListener("input", () => {
+          // Track the live value; do NOT re-render mid-typing or we lose focus.
+          setPromptDraft(editScopeId, node.id, ta.value);
+          updateStudioBar();
+        });
+      }
+      const resetBtn = inspector.querySelector("#promptResetBtn");
+      resetBtn?.addEventListener("click", () => {
+        clearPromptDraft(editScopeId, node.id);
+        renderInspector();
+      });
+      const runBtn = inspector.querySelector("#studioRunBtn");
+      runBtn?.addEventListener("click", runWithEdits);
+    }
+
+    if (!liveDetail) hydrateNodeOutput(node, selectedAtRender);
+    // Polling can re-render the inspector while the user is mid-scroll/edit;
+    // preserve scroll positions and (if focused) the textarea cursor.
+    restoreInspectorScrollState(prevScroll);
+  }
+
+  function updateStudioBar() {
+    const bar = inspector.querySelector(".studio-bar");
+    if (!bar || currentWorkflowId) return;
+    const editScopeId = currentRunId || "project";
+    const count = pendingOverrideCount(editScopeId);
+    const status = bar.querySelector(".studio-status");
+    if (status) {
+      status.innerHTML = count === 0 ? "No edits" : `<b>${count}</b> edit${count === 1 ? "" : "s"} pending`;
+    }
+    const runBtn = bar.querySelector("#studioRunBtn");
+    if (runBtn) runBtn.disabled = count === 0;
+    const ta = inspector.querySelector("#promptEditArea");
+    if (ta) {
+      const baseline = getPromptBaseline(editScopeId, selectedId) ?? "";
+      ta.classList.toggle("edited", ta.value !== baseline);
+    }
+  }
+
+  function renderForkChildren() {
+    const row = document.getElementById("forksRow");
+    const list = document.getElementById("forksList");
+    if (!row || !list) return;
+    if (!currentRunId || !Array.isArray(cachedRunsIndex)) {
+      row.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    const children = cachedRunsIndex
+      .filter(r => r.forkedFrom === currentRunId)
+      .sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
+    if (children.length === 0) {
+      row.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    row.hidden = false;
+    list.innerHTML = children.map(r => {
+      const glyph = statusGlyph(r.status || "unknown");
+      return `<button type="button" class="fork-child" data-run="${escapeHtml(r.id)}" title="${escapeHtml(r.goal || "")}\n${escapeHtml(r.id)} · ${escapeHtml(r.status || "unknown")}">${glyph} ${escapeHtml(shortId(r.id))}</button>`;
+    }).join(" ");
+    list.querySelectorAll(".fork-child").forEach(b =>
+      b.addEventListener("click", () => loadRun(b.dataset.run)));
+  }
+
+  function renderForkLineage() {
+    const parent = currentRunMeta?.forkedFrom ?? null;
+
+    // Inspector-header badge (legacy spot, kept for visibility next to runs picker).
+    const inspBadge = document.getElementById("forkLineage");
+    if (inspBadge) {
+      if (!parent) {
+        inspBadge.hidden = true;
+        inspBadge.textContent = "";
+      } else {
+        inspBadge.hidden = false;
+        inspBadge.textContent = `← forked from ${shortId(parent)}`;
+        inspBadge.dataset.parent = parent;
+      }
+    }
+
+    // Plan-strip row (top of page, right by the new run id).
+    const row = document.getElementById("forkOfRow");
+    const link = document.getElementById("forkOfLink");
+    if (row && link) {
+      if (!parent) {
+        row.hidden = true;
+        link.textContent = "";
+        delete link.dataset.parent;
+      } else {
+        row.hidden = false;
+        link.textContent = shortId(parent);
+        link.dataset.parent = parent;
+      }
+    }
+  }
+
+  async function runWithEdits() {
+    if (!currentRunId) return;
+    const overrides = pendingOverridesForRun(currentRunId);
+    if (Object.keys(overrides).length === 0) return;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Forking ${shortId(currentRunId)} with ${Object.keys(overrides).length} edit(s)...`);
+    try {
+      const result = await postJson(`/api/runs/${encodeURIComponent(currentRunId)}/rerun`, {
+        promptOverrides: overrides,
+      });
+      setRunActionStatus(`Forked as ${shortId(result.runId)} · ${result.status}`,
+        result.status === "succeeded" ? "ok" : result.status === "failed" ? "error" : "");
+      // Drafts on the parent run are discarded once we land on the fork; the
+      // forked run.json now carries them as its baseline.
+      promptDrafts.delete(currentRunId);
+      await refreshRuns(result.runId);
+    } catch (err) {
+      setRunActionStatus(`Run with edits failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  function loadSample(key) {
+    currentSample = key;
+    const s = SAMPLES[key];
+
+    if (key === "_project" && currentWorkflowId) {
+      if (inputStepLabel) inputStepLabel.textContent = "00 / Workflow";
+      if (inputHelpLabel) inputHelpLabel.textContent = "Select the Initial workflow prompt node to edit runtime input. Typing there re-renders prompts but does not change workflow structure.";
+      goalInput.placeholder = `Initial prompt is edited from the graph root node...`;
+    } else {
+      if (inputStepLabel) inputStepLabel.textContent = "00 / Goal";
+      if (inputHelpLabel) inputHelpLabel.textContent = "What outcome do you want?";
+      goalInput.value = s.goal;
+      goalInput.placeholder = "";
+    }
+    pathPill.textContent = s.path;
+    pathPill.classList.toggle("harness", s.path === "harness");
+    planReason.textContent = s.reason;
+    planLatency.textContent = s.latency;
+    planTokens.textContent = s.tokens;
+    runIdEl.textContent = s.runId;
+    execTitle.textContent = s.title;
+
+    sampleBtns.forEach(b => b.classList.toggle("active", b.dataset.sample === key));
+
+    // resize the inner canvas to fit content
+    const maxX = Math.max(...s.nodes.map(n => n.x + NODE_W));
+    const maxY = Math.max(...s.nodes.map(n => n.y + 200));
+    canvasInner.style.width  = Math.max(maxX + 60, 1080) + "px";
+    canvasInner.style.height = Math.max(maxY + 60,  920) + "px";
+    canvasSvg.setAttribute("viewBox", `0 0 ${parseInt(canvasInner.style.width)} ${parseInt(canvasInner.style.height)}`);
+
+    renderNodes(s);
+    // edges depend on rendered node heights — rAF after layout
+    requestAnimationFrame(() => renderEdges(s));
+
+    // Preserve the user's current selection if it still exists in the new
+    // graph (e.g. across a silent poll refresh). Otherwise fall back to the
+    // graph's default selected node.
+    const stillExists = selectedId && s.nodes.some(n => n.id === selectedId);
+    if (!stillExists) selectedId = s.defaultSelected;
+    renderInspector();
+    [...canvasInner.querySelectorAll(".node")].forEach(n => {
+      n.classList.toggle("selected", n.id === "node-" + selectedId);
+    });
+  }
+
+  // ============ Real runs (read-only browser of runs/<id>/) ============
+
+  const runsBar = document.getElementById("runsBar");
+  const provBadge = document.getElementById("provBadge");
+
+  function setRunActionStatus(message, kind = "", openRunId = null) {
+    if (!runActionStatus) return;
+    if (openRunId) {
+      runActionStatus.innerHTML = `${escapeHtml(message || "")} <button type="button" class="status-open-run" data-run="${escapeHtml(openRunId)}">view →</button>`;
+      runActionStatus.querySelector(".status-open-run")?.addEventListener("click", (e) => {
+        const id = e.currentTarget.dataset.run;
+        if (id) loadRun(id);
+      });
+    } else {
+      runActionStatus.textContent = message || "";
+    }
+    runActionStatus.classList.toggle("error", kind === "error");
+    runActionStatus.classList.toggle("ok", kind === "ok");
+  }
+
+  function runStatusKind(status) {
+    return status === "failed" || status === "error" || status === "cancelled" || status === "canceled"
+      ? "error"
+      : status === "succeeded" || status === "finished"
+        ? "ok"
+        : "";
+  }
+
+  function canRunWorkflow() {
+    return Boolean(currentRunMeta?.isSmithersWorkflow || currentWorkflowId);
+  }
+
+  function activeProjectRunIsCancellable() {
+    const status = projectRunInspection?.status || currentRunMeta?.smithersRunDetail?.run?.status || currentRunMeta?.status;
+    return Boolean(currentWorkflowId
+      && currentRunMeta?.liveSmithers === true
+      && projectRunInspection?.runId
+      && projectRunInspection.runId === currentRunId
+      && status
+      && !["finished", "failed", "cancelled", "canceled", "succeeded"].includes(String(status).toLowerCase()));
+  }
+
+  function stopProjectRunInspection() {
+    projectRunInspectionSeq += 1;
+    projectRunInspection = null;
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = true;
+  }
+
+  function setRunButtonsBusy(isBusy) {
+    planBtn.disabled = isBusy || projectModeAvailable;
+    rerunBtn.disabled = isBusy || projectModeAvailable || !currentRunId;
+    if (runWorkflowBtn) runWorkflowBtn.disabled = isBusy || !canRunWorkflow();
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = isBusy || !activeProjectRunIsCancellable();
+    if (editSourceBtn) editSourceBtn.disabled = isBusy || !currentWorkflowId;
+  }
+
+  function setCurrentRunId(runId) {
+    currentRunId = runId;
+    planBtn.disabled = projectModeAvailable;
+    rerunBtn.disabled = projectModeAvailable || !currentRunId;
+    if (runWorkflowBtn) runWorkflowBtn.disabled = !canRunWorkflow();
+    if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
+    if (editSourceBtn) editSourceBtn.disabled = !currentWorkflowId;
+  }
+
+  function scheduleRunRefresh(runId, status) {
+    if (runRefreshTimer) {
+      clearTimeout(runRefreshTimer);
+      runRefreshTimer = null;
+    }
+    if (status !== "running") return;
+    runRefreshTimer = setTimeout(() => {
+      if (currentRunId !== runId) return;
+      // Don't tear down an active edit session for a background refresh.
+      // Reschedule and check again later.
+      const ta = inspector.querySelector("#promptEditArea");
+      if (ta && document.activeElement === ta) {
+        scheduleRunRefresh(runId, status);
+        return;
+      }
+      loadRun(runId, { silent: true, preserveStatus: true });
+    }, 3000);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function setProvenance(meta) {
+    if (!provBadge) return;
+    provBadge.classList.remove("real", "synth", "failed", "demo");
+    if (!meta) {
+      provBadge.classList.add("demo");
+      provBadge.textContent = "demo";
+      return;
+    }
+    if (meta.liveSmithers === true) {
+      provBadge.classList.add("real");
+      provBadge.textContent = "Smithers SQLite · live run";
+      return;
+    }
+    if (meta.historicalUnavailable) {
+      provBadge.classList.add("failed");
+      provBadge.textContent = "Run Frame unavailable";
+      return;
+    }
+    if (meta.smithersRunDetail) {
+      provBadge.classList.add("real");
+      const source = meta.graphSource || meta.smithersRunDetail?.view?.graphSource;
+      provBadge.textContent = source?.kind === "smithers-frame"
+        ? `Run Frame · ${shortId(source.runId)} · frame ${source.frameNo}`
+        : "Smithers SQLite · run";
+      return;
+    }
+    if (meta.status === "failed" || meta.status === "error") {
+      provBadge.classList.add("failed");
+      provBadge.textContent = String(meta.status);
+    } else if (meta.status === "preview" || meta.status === "project") {
+      provBadge.classList.add("synth");
+      provBadge.textContent = "Current Workflow Source preview";
+    } else if (typeof meta.notes === "string" && /synth/i.test(meta.notes)) {
+      provBadge.classList.add("synth");
+      provBadge.textContent = "partial · synth";
+    } else {
+      provBadge.classList.add("real");
+      provBadge.textContent = meta.status === "succeeded" ? "real · succeeded" : "real";
+    }
+  }
+
+  let cachedRunsIndex = [];
+
+  async function loadRunsIndex() {
+    try {
+      const r = await fetch("/runs/index.json", { cache: "no-store" });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const runs = Array.isArray(data?.runs) ? data.runs : null;
+      if (runs) cachedRunsIndex = runs;
+      return runs;
+    } catch (err) {
+      console.warn("runs/index.json unavailable", err);
+      return null;
+    }
+  }
+
+  function shortId(id) {
+    return /^[0-9a-f-]{20,}$/i.test(id) ? id.slice(0, 8) : id;
+  }
+
+  function statusGlyph(status) {
+    if (status === "succeeded" || status === "finished") return "✓";
+    if (status === "running")   return "●";
+    if (status === "failed")    return "✕";
+    if (status === "cancelled" || status === "canceled") return "⊘";
+    if (status === "succeeded-with-unverified-change") return "△";
+    return "·";
+  }
+
+  function runSortTime(run) {
+    if (typeof run?.createdAtMs === "number") return run.createdAtMs;
+    const parsed = Date.parse(run?.started || "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatRunTime(ms) {
+    if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "unknown time";
+    const date = new Date(ms);
+    const today = new Date();
+    const sameDay = date.toDateString() === today.toDateString();
+    return sameDay
+      ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes}B`;
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
+  }
+
+  function populateRunsBar(runs) {
+    if (!runs || runs.length === 0) {
+      runsBar.classList.add("empty");
+      runsSelect.innerHTML = "";
+      return;
+    }
+    runsBar.classList.remove("empty");
+    const placeholder = `<option value="" disabled${currentRunId ? "" : " selected"}>— select run —</option>`;
+    const sortedRuns = [...runs].sort((a, b) => runSortTime(b) - runSortTime(a));
+    const options = sortedRuns.map(r => {
+      const id = r.runId || r.id;
+      const path = r.workflowName ? "smithers" : r.path === "harness" ? "harness" : "workflow";
+      const goal = (r.goal || r.workflowName || "").trim();
+      const goalShort = goal.length > 36 ? goal.slice(0, 36) + "…" : goal;
+      const st = r.status || "unknown";
+      const time = formatRunTime(runSortTime(r));
+      const label = `${statusGlyph(st)} ${time} · ${st} · [${path}] ${goalShort || shortId(id)}`;
+      return `<option value="${escapeHtml(id)}" title="${escapeHtml(goal)}\n${escapeHtml(id)} · ${escapeHtml(st)} · ${escapeHtml(time)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    runsSelect.innerHTML = placeholder + options;
+    if (currentRunId) runsSelect.value = currentRunId;
+  }
+
+  async function refreshRuns(selectRunId) {
+    if (currentWorkflowId) return refreshProjectRuns(selectRunId);
+    const runs = await loadRunsIndex();
+    populateRunsBar(runs);
+    renderForkChildren();
+    if (selectRunId) await loadRun(selectRunId);
+    return runs;
+  }
+
+  async function refreshProjectRuns(selectRunId) {
+    if (!currentWorkflowId) return [];
+    const data = await fetch(`/api/smithers/runs?workflowId=${encodeURIComponent(currentWorkflowId)}&limit=20`, { cache: "no-store" }).then(r => r.json());
+    const runs = data.ok === false ? [] : (data.runs || []);
+    populateRunsBar(runs);
+    if (selectRunId) await loadProjectRun(selectRunId);
+    return runs;
+  }
+
+  function enterCurrentWorkflowSourcePreview() {
+    stopProjectRunInspection();
+    currentRunMeta = null;
+    setCurrentRunId(null);
+    if (runsSelect) runsSelect.value = "";
+  }
+
+  async function loadProjectRun(runId) {
+    stopProjectRunInspection();
+    const response = await fetch(`/api/smithers/runs/${encodeURIComponent(runId)}?includeOutputs=true&frameLimit=5&eventLimit=500`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Smithers run detail ${response.status}`);
+    const data = await response.json();
+    if (data.ok === false) throw new Error(data.error || data.code || "Smithers run detail failed");
+    const detail = data.detail || data;
+    currentRunMeta = {
+      id: runId,
+      inspectionUrl: `/api/smithers/runs/${encodeURIComponent(runId)}`,
+      smithersRunDetail: detail,
+      liveSmithers: false,
+      isSmithersWorkflow: true,
+      workflowPath: workflowPathForCurrentProject(),
+    };
+    await renderHistoricalProjectRunGraph(detail);
+    setCurrentRunId(runId);
+    setRunActionStatus(`Loaded Smithers run ${shortId(runId)} · ${detail.run?.status || "unknown"}`, runStatusKind(detail.run?.status));
+    if (runsSelect) runsSelect.value = runId;
+    return detail;
+  }
+
+  async function loadRun(runId, options = {}) {
+    try {
+      const [planResp, runResp, eventsResp] = await Promise.all([
+        fetch(`/runs/${encodeURIComponent(runId)}/plan.json`, { cache: "no-store" }),
+        fetch(`/runs/${encodeURIComponent(runId)}/run.json`,  { cache: "no-store" }),
+        fetch(`/runs/${encodeURIComponent(runId)}/events.jsonl`, { cache: "no-store" }),
+      ]);
+      if (!planResp.ok) throw new Error(`plan.json ${planResp.status}`);
+      if (!runResp.ok)  throw new Error(`run.json ${runResp.status}`);
+      const [plan, runMeta, eventsText] = await Promise.all([
+        planResp.json(),
+        runResp.json(),
+        eventsResp.ok ? eventsResp.text() : Promise.resolve(""),
+      ]);
+      const graph = plan.graph;
+      if (!graph || !Array.isArray(graph.nodes)) {
+        throw new Error("plan.graph missing or malformed");
+      }
+      attachOutputMetadata(graph, eventsText);
+      // overlay run.json metadata onto graph
+      graph.runId = runMeta.id || graph.runId;
+      graph.runStatus = runMeta.status || "unknown";
+      if (graph.latency === "unknown" || !graph.latency) {
+        graph.latency = runMeta.totals?.latencyMs != null
+          ? `${runMeta.totals.latencyMs}ms` : "unknown";
+      }
+      if (graph.tokens === "unknown" || !graph.tokens) {
+        graph.tokens = runMeta.totals?.tokens != null
+          ? String(runMeta.totals.tokens) : "unknown";
+      }
+
+      SAMPLES._live = graph;
+      // Capture per-run metadata the studio needs (workflow source + lineage).
+      const source = plan?.raw?.source ?? null;
+      const isSmithersWorkflow = source?.kind === "smithers";
+      currentRunMeta = {
+        id: runMeta.id,
+        goal: runMeta.goal ?? null,
+        forkedFrom: runMeta.forkedFrom ?? null,
+        isSmithersWorkflow,
+        workflowPath: isSmithersWorkflow ? source.workflowPath : null,
+        input: isSmithersWorkflow && source.input && typeof source.input === "object" ? source.input : null,
+        existingOverrides: isSmithersWorkflow ? (source.promptOverrides ?? {}) : {},
+      };
+      // Seed baselines so we can tell "edited vs original" for this run's tasks.
+      const baselines = new Map();
+      if (Array.isArray(graph.nodes)) {
+        for (const n of graph.nodes) {
+          if (n.type === "task" && typeof n.prompt === "string") baselines.set(n.id, n.prompt);
+        }
+      }
+      promptBaselines.set(runId, baselines);
+
+      loadSample("_live");
+      setProvenance(runMeta);
+      setCurrentRunId(runId);
+      if (!options.preserveStatus) setRunActionStatus("");
+      if (options.preserveStatus && runMeta.status && runMeta.status !== "running") {
+        setRunActionStatus(`Run ${shortId(runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
+      }
+      scheduleRunRefresh(runId, runMeta.status);
+
+      // update active button states
+      document.querySelectorAll(".sample-btn").forEach(b => b.classList.remove("active"));
+      if (runsSelect && [...runsSelect.options].some(o => o.value === runId)) {
+        runsSelect.value = runId;
+      }
+      renderForkLineage();
+      renderForkChildren();
+      return runMeta;
+    } catch (err) {
+      console.error("failed to load run", runId, err);
+      if (options.silent) return null;
+      setProvenance({ status: "failed", notes: `Could not load: ${err.message}` });
+      setRunActionStatus(`Load failed · ${err.message}`, "error");
+      return null;
+    }
+  }
+
+  async function waitForRunToRender(runId) {
+    setCurrentRunId(runId);
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await refreshRuns();
+      const runMeta = await loadRun(runId, { silent: true, preserveStatus: true });
+      if (runMeta) return runMeta;
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    throw new Error("run artifacts not ready");
+  }
+
+  function startProjectRunInspection({ runId, inspectionUrl, initialStatus }) {
+    projectRunInspectionSeq += 1;
+    const seq = projectRunInspectionSeq;
+    projectRunInspection = {
+      runId,
+      inspectionUrl: inspectionUrl || `/api/smithers/runs/${encodeURIComponent(runId)}`,
+      lastEventSeq: 0,
+      notFoundRetries: 0,
+      status: initialStatus || "running",
+    };
+    pollProjectRunInspectionOnce(seq);
+  }
+
+  async function pollProjectRunInspectionOnce(seq) {
+    if (seq !== projectRunInspectionSeq || !projectRunInspection) return;
+    const state = projectRunInspection;
+    try {
+      const { buildProjectRunInspectionUrl, isTerminalSmithersRunStatus } = await loadWorkflowRunUiHelper();
+      const url = buildProjectRunInspectionUrl({
+        runId: state.runId,
+        inspectionUrl: state.inspectionUrl,
+        eventsAfterSeq: state.lastEventSeq,
+        includeOutputs: true,
+      });
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.status === 404 && state.notFoundRetries < 4) {
+        state.notFoundRetries += 1;
+        setRunActionStatus(`Waiting for Smithers run ${shortId(state.runId)} to appear in SQLite...`);
+        setTimeout(() => pollProjectRunInspectionOnce(seq), 750);
+        return;
+      }
+      if (!response.ok) throw new Error(`inspection ${response.status}`);
+      const data = await response.json();
+      if (data.ok === false) throw new Error(data.error || data.code || "inspection failed");
+      const detail = data.detail || data;
+      const previousDetail = currentRunMeta?.smithersRunDetail;
+      if (previousDetail && Array.isArray(previousDetail.events) && Array.isArray(detail.events)) {
+        const eventsBySeq = new Map(previousDetail.events.map(event => [event.seq, event]));
+        detail.events.forEach(event => eventsBySeq.set(event.seq, event));
+        detail.events = [...eventsBySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+      }
+      const status = detail?.run?.status || data.status || state.status || "unknown";
+      if (seq !== projectRunInspectionSeq || projectRunInspection !== state || currentRunId !== state.runId) return;
+      state.status = status;
+      state.notFoundRetries = 0;
+      if (typeof detail?.cursors?.nextEventSeq === "number") {
+        state.lastEventSeq = detail.cursors.nextEventSeq;
+      }
+      currentRunMeta = {
+        ...(currentRunMeta || {}),
+        id: state.runId,
+        inspectionUrl: state.inspectionUrl,
+        smithersRunDetail: detail,
+        liveSmithers: true,
+        isSmithersWorkflow: true,
+      };
+      const livePollStillCurrent = () => seq === projectRunInspectionSeq
+        && projectRunInspection === state
+        && currentRunId === state.runId
+        && currentRunMeta?.liveSmithers === true;
+      if (currentWorkflowGraph && livePollStillCurrent()) {
+        currentWorkflowGraph.runId = state.runId;
+        currentWorkflowGraph.runStatus = status;
+        await renderProjectGraphForCurrentState({
+          previewGraph: currentWorkflowGraph,
+          liveMode: true,
+          liveDetail: detail,
+          shouldApply: livePollStillCurrent,
+        });
+      }
+      if (seq !== projectRunInspectionSeq || projectRunInspection !== state || currentRunId !== state.runId || currentRunMeta?.liveSmithers !== true) return;
+      runIdEl.textContent = state.runId;
+      setProvenance({ liveSmithers: true, status });
+      setRunActionStatus(`Smithers SQLite · live run ${shortId(state.runId)} · ${status}`, runStatusKind(status));
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
+      if (!isTerminalSmithersRunStatus(status)) {
+        setTimeout(() => pollProjectRunInspectionOnce(seq), status === "running" ? 1500 : 3000);
+      }
+    } catch (err) {
+      if (seq !== projectRunInspectionSeq) return;
+      setRunActionStatus(`Live inspection failed · ${err.message}`, "error");
+    }
+  }
+
+  function attachOutputMetadata(graph, eventsText) {
+    if (!eventsText) return;
+    const byId = new Map(graph.nodes.map(node => [node.id, node]));
+    eventsText.trim().split("\n").forEach(line => {
+      if (!line.trim()) return;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (event.type !== "agent.output" || !event.nodeId) return;
+      const node = byId.get(event.nodeId);
+      if (!node) return;
+      if (typeof event.artifact === "string") node.outputArtifact = event.artifact;
+      if (typeof event.preview === "string") node.outputPreview = event.preview;
+      if (typeof event.bytes === "number") node.outputBytes = event.bytes;
+    });
+  }
+
+  async function postJson(url, payload, method = "POST") {
+    const response = await fetch(url, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || data.status || `HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  async function startRunFromGoal() {
+    const goal = goalInput.value.trim();
+    if (!goal) {
+      setRunActionStatus("Goal required", "error");
+      return;
+    }
+
+    setRunButtonsBusy(true);
+    setRunActionStatus("Starting run...");
+    try {
+      const result = await postJson("/api/runs", { goal });
+      setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`);
+      const runMeta = await waitForRunToRender(result.runId);
+      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
+    } catch (err) {
+      setRunActionStatus(`Run failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  async function cancelProjectRun() {
+    if (!currentWorkflowId || !projectRunInspection?.runId) return;
+    const runId = projectRunInspection.runId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Stopping Smithers run ${shortId(runId)}...`);
+    try {
+      const result = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/runs/${encodeURIComponent(runId)}/cancel`, {});
+      projectRunInspection.status = result.status || "cancelled";
+      projectRunInspectionSeq += 1;
+      await refreshProjectRuns(runId);
+      if (currentRunMeta) currentRunMeta.liveSmithers = false;
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = true;
+      setProvenance({ liveSmithers: false, status: result.status || "cancelled" });
+      setRunActionStatus(`Stopped Smithers run ${shortId(runId)} · ${result.status || "cancelled"}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Stop failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  async function runWorkflowFresh() {
+    if (currentWorkflowId) {
+      setRunButtonsBusy(true);
+      setRunActionStatus(`Starting ${currentWorkflowId} through Smithers...`);
+      try {
+        const input = currentProjectInput();
+        const { buildProjectWorkflowRunPayload } = await loadWorkflowRunUiHelper();
+        const result = await postJson(
+          `/api/workflows/${encodeURIComponent(currentWorkflowId)}/run`,
+          buildProjectWorkflowRunPayload(input),
+        );
+        setRunActionStatus(`Started ${shortId(result.runId)} · opening Smithers SQLite live inspection`, runStatusKind(result.status));
+        runIdEl.textContent = result.runId;
+        setCurrentRunId(result.runId);
+        currentRunMeta = {
+          id: result.runId,
+          goal: currentProjectInputText(),
+          forkedFrom: null,
+          isSmithersWorkflow: true,
+          workflowPath: workflowPathForCurrentProject(),
+          input,
+          existingOverrides: {},
+          inspectionUrl: result.inspection?.url || `/api/smithers/runs/${encodeURIComponent(result.runId)}`,
+          liveSmithers: true,
+        };
+        setProvenance({ liveSmithers: true, status: result.status });
+        if (currentWorkflowGraph) {
+          currentWorkflowGraph.runId = result.runId;
+          currentWorkflowGraph.runStatus = result.status;
+          await renderProjectGraphForCurrentState({ previewGraph: currentWorkflowGraph, liveMode: false });
+        }
+        await refreshProjectRuns();
+        startProjectRunInspection({
+          runId: result.runId,
+          inspectionUrl: result.inspection?.url,
+          initialStatus: result.status,
+        });
+      } catch (err) {
+        setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
+      } finally {
+        setRunButtonsBusy(false);
+      }
+      return;
+    }
+
+    if (!currentRunMeta?.isSmithersWorkflow || !currentRunMeta.workflowPath) {
+      setRunActionStatus("Load a Smithers workflow run first", "error");
+      return;
+    }
+    const sourceRunId = currentRunId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Starting fresh run from ${currentRunMeta.workflowPath.split("/").pop()}...`);
+    try {
+      // Bundle any pending studio edits with whatever overrides the parent
+      // already had baked in. New (drafts) win over inherited.
+      const drafts = sourceRunId ? pendingOverridesForRun(sourceRunId) : {};
+      const inherited = currentRunMeta.existingOverrides ?? {};
+      const merged = { ...inherited, ...drafts };
+      const promptOverrides = Object.keys(merged).length > 0 ? merged : undefined;
+
+      const payload = {
+        workflowPath: currentRunMeta.workflowPath,
+        input: currentRunMeta.input ?? {},
+        ...(currentRunMeta.goal ? { goal: currentRunMeta.goal } : {}),
+        ...(promptOverrides ? { promptOverrides } : {}),
+      };
+      const result = await postJson("/api/smithers-runs", payload);
+      // Drafts on the source run are what we just shipped; clear them so the
+      // studio bar resets if the user returns to the parent.
+      if (sourceRunId) promptDrafts.delete(sourceRunId);
+      setRunActionStatus(`Started ${shortId(result.runId)} · loading...`);
+      // RUN WORKFLOW means "start a fresh experiment" — auto-switch to the new
+      // run so the user actually sees something change. (Rerun Selected stays
+      // sticky because that fork's task states would look like regressions.)
+      const runMeta = await waitForRunToRender(result.runId);
+      setRunActionStatus(`${shortId(result.runId)} · ${runMeta.status}`,
+        runStatusKind(runMeta.status));
+    } catch (err) {
+      setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  async function rerunCurrentRun() {
+    if (projectModeAvailable) {
+      setRunActionStatus("Rerun Selected is for legacy runs. Use Start Full Run for this Smithers workflow.", "error");
+      return;
+    }
+    if (!currentRunId) {
+      setRunActionStatus("Select a run first", "error");
+      return;
+    }
+
+    const sourceRunId = currentRunId;
+    setRunButtonsBusy(true);
+    setRunActionStatus(`Forking ${shortId(sourceRunId)}...`);
+    try {
+      const result = await postJson(`/api/runs/${encodeURIComponent(sourceRunId)}/rerun`, {});
+      // Don't auto-switch the user onto the brand-new fork. A freshly-started
+      // fork has no events yet, so the DAG would render every previously-failed
+      // task as 'pending' — which looks like the parent's state regressed.
+      // Refresh the dropdown so the new id is selectable, and tell the user
+      // it's there.
+      await refreshRuns();
+      setRunActionStatus(`Forked as ${shortId(result.runId)} ·`,
+        result.status === "failed" ? "error" : "ok",
+        result.runId);
+    } catch (err) {
+      setRunActionStatus(`Rerun failed · ${err.message}`, "error");
+      await refreshRuns();
+      if (currentRunId === sourceRunId) {
+        await loadRun(sourceRunId, { silent: true, preserveStatus: true });
+      }
+    } finally {
+      setRunButtonsBusy(false);
+    }
+  }
+
+  function renderSourceEditor() {
+    selectedId = "__source";
+    [...canvasInner.querySelectorAll(".node")].forEach(n => n.classList.remove("selected"));
+    inspector.innerHTML = `
+      <div class="insp-head">
+        <div class="insp-eyebrow">
+          <span><b>Smithers workflow source</b></span>
+          <span>${escapeHtml(currentWorkflowId || "")}</span>
+        </div>
+        <h3 class="insp-title">Edit .smithers workflow</h3>
+        <div class="insp-sub">Saving writes the workflow .tsx file, then re-renders the preview graph.</div>
+      </div>
+      <div class="insp-body">
+        <div class="studio-bar">
+          <span class="studio-status">Source edit · canonical Smithers file</span>
+          <button class="btn studio-run" id="saveSourceBtn">Save + re-render <span class="arrow">→</span></button>
+        </div>
+        <div class="field">
+          <div class="lbl">Workflow source</div>
+          <textarea class="source-edit" id="sourceEditArea" spellcheck="false">${escapeHtml(currentWorkflowSource || "")}</textarea>
+        </div>
+      </div>
+    `;
+    inspector.querySelector("#saveSourceBtn")?.addEventListener("click", saveWorkflowSource);
+  }
+
+  async function openWorkflowSourceEditor() {
+    if (!currentWorkflowId) return;
+    setRunActionStatus(`Loading source for ${currentWorkflowId}...`);
+    try {
+      const data = await fetch(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source`, { cache: "no-store" }).then(r => r.json());
+      if (data.ok === false) throw new Error(data.error || "source load failed");
+      currentWorkflowSource = data.source || "";
+      renderSourceEditor();
+      setRunActionStatus(`Editing ${currentWorkflowId}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Source load failed · ${err.message}`, "error");
+    }
+  }
+
+  async function saveWorkflowSource() {
+    if (!currentWorkflowId) return;
+    const area = inspector.querySelector("#sourceEditArea");
+    if (!area) return;
+    const source = area.value;
+    setRunActionStatus(`Saving ${currentWorkflowId}...`);
+    try {
+      const saved = await postJson(`/api/workflows/${encodeURIComponent(currentWorkflowId)}/source`, { source }, "PUT");
+      currentWorkflowSource = source;
+      await refreshProjectGraphFromInput();
+      setRunActionStatus(`Saved ${saved.workflowId} · preview re-rendered`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Save failed · ${err.message}`, "error");
+    }
+  }
+
+  async function loadProjectWorkflowMode() {
+    try {
+      const project = await fetch("/api/project", { cache: "no-store" }).then(r => r.ok ? r.json() : null);
+      if (!project || project.ok === false) {
+        if (project?.status === "setup-needed") setRunActionStatus(project.error || "Smithers setup needed", "error");
+        return false;
+      }
+      const workflows = await fetch("/api/workflows", { cache: "no-store" }).then(r => r.json());
+      if (workflows.ok === false) {
+        setRunActionStatus(workflows.error || "Could not load workflows", "error");
+        return false;
+      }
+      const selected = project.defaultWorkflowId
+        || workflows.workflows?.[0]?.id;
+      if (!selected) return false;
+      goalInput.value = loadStoredProjectInput(selected);
+      const graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      if (graphResponse.ok === false) {
+        setRunActionStatus(graphResponse.error || "Could not render workflow graph", "error");
+        return false;
+      }
+      projectModeAvailable = true;
+      currentProject = { ...project, workflows: workflows.workflows ?? [] };
+      currentWorkflowId = selected;
+      currentWorkflowGraph = graphResponse.graph;
+      rememberProjectOutputTables(graphResponse.graph);
+      await renderProjectGraphForCurrentState({
+        previewGraph: graphResponse.graph,
+        liveMode: Boolean(currentRunMeta?.liveSmithers && currentRunMeta?.smithersRunDetail),
+        liveDetail: currentRunMeta?.smithersRunDetail,
+      });
+      goalInput.placeholder = `Initial prompt is edited from the graph root node...`;
+      setProvenance({ status: "project" });
+      currentRunMeta = null;
+      setCurrentRunId(null);
+      planBtn.disabled = true;
+      rerunBtn.disabled = true;
+      if (runWorkflowBtn) runWorkflowBtn.disabled = false;
+      if (cancelWorkflowRunBtn) cancelWorkflowRunBtn.disabled = !activeProjectRunIsCancellable();
+      if (editSourceBtn) editSourceBtn.disabled = false;
+      await refreshProjectRuns();
+      setRunActionStatus(`Loaded ${selected} from ${project.projectRoot}`, "ok");
+      return true;
+    } catch (err) {
+      console.warn("project workflow mode unavailable", err);
+      return false;
+    }
+  }
+
+  function projectInputStorageKey(workflowId) {
+    return workflowId ? `custom-harness:project-input:${workflowId}` : null;
+  }
+
+  function loadStoredProjectInput(workflowId) {
+    const key = projectInputStorageKey(workflowId);
+    if (!key) return "";
+    try { return localStorage.getItem(key) || ""; } catch { return ""; }
+  }
+
+  function saveStoredProjectInput(workflowId, value) {
+    const key = projectInputStorageKey(workflowId);
+    if (!key) return;
+    try { localStorage.setItem(key, value); } catch {}
+  }
+
+  function currentProjectInputText() {
+    return goalInput.value;
+  }
+
+  function currentProjectInput() {
+    const requestText = currentProjectInputText();
+    console.log("[project-input]", requestText);
+    return requestText.trim() ? { request: requestText, prompt: requestText } : {};
+  }
+
+  function rememberProjectOutputTables(graph) {
+    if (!graph?.nodes) return;
+    for (const node of graph.nodes) {
+      const table = node?.smithers?.outputTableName;
+      if (node?.id && typeof table === "string" && table) projectNodeOutputTables.set(node.id, table);
+    }
+  }
+
+  function currentProjectOutputs() {
+    const out = {};
+    for (const [nodeId, value] of projectNodeOutputs) {
+      const table = projectNodeOutputTables.get(nodeId) || nodeId;
+      if (!out[table]) out[table] = [];
+      out[table].push({ nodeId, iteration: 0, ...(value && typeof value === "object" ? value : { value }) });
+    }
+    return out;
+  }
+
+  function projectGraphUrl(workflowId) {
+    const input = currentProjectInput();
+    const outputs = currentProjectOutputs();
+    const params = new URLSearchParams();
+    if (Object.keys(input).length > 0) params.set("input", JSON.stringify(input));
+    if (Object.keys(outputs).length > 0) params.set("outputs", JSON.stringify(outputs));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return `/api/workflows/${encodeURIComponent(workflowId)}/graph${query}`;
+  }
+
+  async function refreshProjectGraphFromInput() {
+    if (!currentWorkflowId) return;
+    enterCurrentWorkflowSourcePreview();
+    try {
+      const graphResponse = await fetch(projectGraphUrl(currentWorkflowId), { cache: "no-store" }).then(r => r.json());
+      if (graphResponse.ok === false) throw new Error(graphResponse.error || "graph render failed");
+      currentWorkflowGraph = graphResponse.graph;
+      rememberProjectOutputTables(graphResponse.graph);
+      await renderProjectGraphForCurrentState({
+        previewGraph: graphResponse.graph,
+        liveMode: false,
+        liveDetail: null,
+      });
+      setProvenance({ status: "preview", notes: "Current Workflow Source preview" });
+      setRunActionStatus(`Preview updated for ${currentWorkflowId}`, "ok");
+    } catch (err) {
+      setRunActionStatus(`Preview failed · ${err.message}`, "error");
+    }
+  }
+
+  let projectInputRefreshTimer = null;
+  goalInput.addEventListener("input", () => {
+    if (!currentWorkflowId) return;
+    saveStoredProjectInput(currentWorkflowId, goalInput.value);
+    clearTimeout(projectInputRefreshTimer);
+    projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
+  });
+
+  // ============ Wiring ============
+
+  sampleBtns.forEach(b => b.addEventListener("click", () => {
+    projectModeAvailable = false;
+    loadSample(b.dataset.sample);
+    setProvenance(null);
+    // Clear the meta first so the button-enable logic in setCurrentRunId sees
+    // "no workflow loaded" and disables Run Workflow.
+    currentRunMeta = null;
+    currentWorkflowId = null;
+    setCurrentRunId(null);
+    setRunActionStatus("");
+    if (runsSelect) runsSelect.value = "";
+    renderForkLineage();
+    renderForkChildren();
+  }));
+
+  planBtn.addEventListener("click", startRunFromGoal);
+  rerunBtn.addEventListener("click", rerunCurrentRun);
+  runWorkflowBtn?.addEventListener("click", runWorkflowFresh);
+  cancelWorkflowRunBtn?.addEventListener("click", cancelProjectRun);
+  editSourceBtn?.addEventListener("click", openWorkflowSourceEditor);
+
+  runsSelect.addEventListener("change", () => {
+    if (!runsSelect.value) return;
+    if (currentWorkflowId) loadProjectRun(runsSelect.value).catch(err => setRunActionStatus(`Load failed · ${err.message}`, "error"));
+    else loadRun(runsSelect.value);
+  });
+
+  document.getElementById("forkLineage")?.addEventListener("click", (e) => {
+    const parent = e.currentTarget.dataset.parent;
+    if (parent) loadRun(parent);
+  });
+  document.getElementById("forkOfLink")?.addEventListener("click", (e) => {
+    const parent = e.currentTarget.dataset.parent;
+    if (parent) loadRun(parent);
+  });
+
+  resetBtn.addEventListener("click", () => loadSample(currentSample));
+  closeOutputBtn?.addEventListener("click", closeOutputViewer);
+  outputModalBackdrop?.addEventListener("click", (event) => {
+    if (event.target === outputModalBackdrop) closeOutputViewer();
+  });
+  copyOutputBtn?.addEventListener("click", async () => {
+    if (!currentOutputMarkdown) return;
+    await navigator.clipboard?.writeText(currentOutputMarkdown);
+    setRunActionStatus("Copied output markdown", "ok");
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !outputModalBackdrop?.hidden) closeOutputViewer();
+  });
+
+  window.addEventListener("resize", () => {
+    requestAnimationFrame(() => renderEdges(SAMPLES[currentSample]));
+  });
+
+  // initial: prefer project workflow mode, then fall back to demo + legacy runs picker.
+  loadProjectWorkflowMode().then((loaded) => {
+    if (loaded) return;
+    projectModeAvailable = false;
+    loadSample("audit");
+    setProvenance(null);
+    setCurrentRunId(null);
+    loadRunsIndex().then(populateRunsBar);
+  });
+</script>
+
+</body>
+</html>

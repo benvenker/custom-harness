@@ -1,0 +1,7 @@
+if command -v br >/dev/null 2>&1 && [ -d .beads ]; then
+  br sync --flush-only -v
+fi
+
+bunx lint-staged
+bun run typecheck
+bun run test

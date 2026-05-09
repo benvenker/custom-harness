@@ -1,0 +1,22 @@
+{
+  "Custom Harness": {
+    "referenced_by": ["Smithers Canonical State", "Smithers Orchestrator", "Alpha Workflow Viewer"],
+    "reference_count": 3
+  },
+  "Smithers Orchestrator": {
+    "referenced_by": ["Custom Harness", "Smithers Integration Analysis"],
+    "reference_count": 2
+  },
+  "Smithers Canonical State": {
+    "referenced_by": [],
+    "reference_count": 0
+  },
+  "Smithers Integration Analysis": {
+    "referenced_by": [],
+    "reference_count": 0
+  },
+  "Alpha Workflow Viewer": {
+    "referenced_by": [],
+    "reference_count": 0
+  }
+}

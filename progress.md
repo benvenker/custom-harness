@@ -1,0 +1,6 @@
+Smithers research progress (2026-05-07)
+
+- Searched public Smithers docs, npm/jsDelivr package source, and GitHub.
+- Found authoritative docs at smithers.sh plus published package source for workflow pack and CLI discovery behavior.
+- Key evidence collected: installation workflow pack layout, CLI command catalog, renderFrame/graph behavior, runWorkflow/up behavior, workflow discovery implementation, and execution model ownership of scheduling/persistence/resume/approvals.
+- Writing final findings to research.md.

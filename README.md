@@ -1,3 +1,12 @@
 # custom-harness
 
-Experimental combination of smithers.sh and flueframework.com. Your goal is to create a project tbat combiens the two in a way that lets tbe user define an outcome, ans then the agent can decide how to exwcute it,from creating its own narmess to deciding it meeds a durable workflow. 
+Smithers-first durable outcome runner. The CLI accepts a user goal, records a
+planner decision as `path: "harness" | "workflow"` for artifact compatibility,
+then executes either one Smithers CLI-agent task or a deterministic workflow DAG.
+
+```bash
+bun src/index.ts --goal "summarize this repo" --context "focus on tests"
+```
+
+Run artifacts are written under `runs/<run-id>/` with `run.json`, `plan.json`,
+`events.jsonl`, and task artifacts for the web inspector.

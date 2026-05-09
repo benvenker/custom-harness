@@ -1,0 +1,12 @@
+{
+  "autoRegister": true,
+  "scopeToFolder": true,
+  "contextMode": "minimal",
+  "feedRetention": 100,
+  "stuckThreshold": 900,
+  "stuckNotify": true,
+  "autoStatus": true,
+  "autoOverlay": true,
+  "autoOverlayPlanning": true,
+  "crewEventsInFeed": true
+}

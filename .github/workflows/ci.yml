@@ -26,22 +26,11 @@ jobs:
         run: ./node_modules/.bin/tsc --noEmit
       - name: Unit tests
         run: bun test tests/schema.test.ts
-      - name: Check API key availability
-        id: check-key
-        env:
-          KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: |
-          if [ -n "$KEY" ]; then
-            echo "has-key=true" >> $GITHUB_OUTPUT
-          else
-            echo "has-key=false" >> $GITHUB_OUTPUT
-          fi
 
   e2e-harness:
     name: E2E harness path (Flue session.task)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: needs.typecheck-and-unit.outputs.has-api-key == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -50,7 +39,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Run harness goal
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CUSTOM_HARNESS_FAKE_PLAN: '{"path":"harness","reason":"CI deterministic harness path"}'
+          CUSTOM_HARNESS_FAKE_EXECUTOR_OUTPUT: '{"result":"CI fake executor listed repository files and counted TypeScript files."}'
         run: |
           bun src/index.ts --goal "list the files in the current directory and tell me how many TypeScript files there are"
 
@@ -58,7 +48,6 @@ jobs:
     name: E2E workflow path (Smithers DAG)
     runs-on: ubuntu-latest
     needs: typecheck-and-unit
-    if: needs.typecheck-and-unit.outputs.has-api-key == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -67,7 +56,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Run workflow goal and verify output
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CUSTOM_HARNESS_FAKE_PLAN: >-
+            {"path":"workflow","reason":"CI deterministic workflow path","workflow":{"name":"ci-summary","description":"Read project files separately, then summarize.","root":{"type":"sequence","name":"ci-sequence","children":[{"type":"task","name":"Read package","prompt":"Read package.json."},{"type":"task","name":"Read agents","prompt":"Read AGENTS.md."},{"type":"task","name":"Summarize","prompt":"Produce a one-sentence project summary."}]}}}
+          CUSTOM_HARNESS_FAKE_EXECUTOR_OUTPUT: '{"result":"CI fake executor completed this workflow task."}'
         run: |
           bun src/index.ts --goal "read package.json and AGENTS.md separately, then produce a one-sentence summary of this project" | tee /tmp/summary.txt
           grep -qE '\S' /tmp/summary.txt

@@ -1,6 +1,29 @@
 node_modules/
 dist/
 .harness/
+.smithers/
+# Pi project config/crew skills are tracked; runtime/session data remains ignored below.
+.pi/*
+!.pi/pi-messenger.json
+!.pi/messenger/
+.pi/messenger/*
+!.pi/messenger/crew/
+.pi/messenger/crew/*
+!.pi/messenger/crew/config.json
+!.pi/messenger/crew/skills/
+!.pi/messenger/crew/skills/*.md
+web/*
+!web/index.html
 .env
 *.db
+*.db-shm
+*.db-wal
 smithers.db*
+
+# Generated local/prototype run artifacts. Keep tracked reference assets under runs/.
+runs/index.json
+runs/[0-9a-f][0-9a-f][0-9a-f][0-9a-f]*/
+.poolside/tasks/
+
+# bv (beads viewer) local config and caches
+.bv/
