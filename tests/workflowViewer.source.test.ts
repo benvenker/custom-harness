@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHarnessServerHandler } from '../src/server.js';
+import { loadWorkflow } from '../src/app/smithersRuntime.js';
 
 function tempProject(prefix: string) {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -15,6 +16,26 @@ function writeWorkflow(projectRoot: string, id: string, source: string) {
   writeFileSync(path, source);
   return path;
 }
+
+describe('Smithers workflow runtime loader', () => {
+  it('reloads edited workflow modules instead of reusing stale dynamic-import cache', async () => {
+    const projectRoot = tempProject('custom-harness-workflow-cache-bust-');
+    const workflowPath = writeWorkflow(projectRoot, 'foo', `
+      const marker = 'before';
+      export default { marker, zodToKeyName: new Map() };
+    `);
+
+    const before = await loadWorkflow(workflowPath) as { marker?: string };
+    writeFileSync(workflowPath, `
+      const marker = 'after';
+      export default { marker, zodToKeyName: new Map() };
+    `);
+    const after = await loadWorkflow(workflowPath) as { marker?: string };
+
+    expect(before.marker).toBe('before');
+    expect(after.marker).toBe('after');
+  });
+});
 
 describe('project workflow source API', () => {
   it('returns the selected workflow source for editing', async () => {
