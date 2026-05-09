@@ -529,6 +529,48 @@ describe("workflow viewer studio inspector state", () => {
     expect(actions).not.toContain("Start run with override");
   });
 
+  it("keeps model-select values from editor metadata instead of falling back to stale rendered graph values", async () => {
+    const state = await projectInspectorState({
+      id: "primary-plan",
+      type: "task",
+      title: "Primary Plan",
+      prompt: "USER REQUEST: Ship the alpha",
+      smithers: {
+        meta: {
+          editor: {
+            editable: true,
+            fields: {
+              model: {
+                label: "Model",
+                kind: "model-select",
+                sourcePath: ["agents", "primary", "model"],
+                value: "openai/gpt-5.5-pro",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(state.structuredFields).toEqual([
+      expect.objectContaining({
+        id: "model",
+        control: "select",
+        value: "openai/gpt-5.5-pro",
+        sourcePath: ["agents", "primary", "model"],
+      }),
+    ]);
+  });
+
+  it("web source-value seeding reads meta.editor, not the removed meta.studio path", () => {
+    const html = readFileSync("web/index.html", "utf8");
+    const helper = html.match(
+      /function sourceValuesByPathForNode\(node\) \{(?<body>[\s\S]*?)\n  function buildFallbackProjectInspectorState/
+    )?.groups?.body ?? "";
+    expect(helper).toContain("node?.smithers?.meta?.editor");
+    expect(helper).not.toContain("meta?.studio");
+  });
+
   it("does not make a project workflow task editable unless studio metadata explicitly enables a supported field", async () => {
     const state = await projectInspectorState(
       {

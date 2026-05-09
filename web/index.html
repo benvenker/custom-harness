@@ -1875,10 +1875,10 @@
   }
 
   function sourceValuesByPathForNode(node) {
-    const studio = node?.smithers?.meta?.studio;
-    if (!studio?.fields || typeof studio.fields !== "object") return {};
+    const editor = node?.smithers?.meta?.editor;
+    if (!editor?.fields || typeof editor.fields !== "object") return {};
     const values = {};
-    for (const field of Object.values(studio.fields)) {
+    for (const field of Object.values(editor.fields)) {
       if (!field || !Array.isArray(field.sourcePath)) continue;
       const key = field.sourcePath.join(".");
       if (typeof field.value === "string") values[key] = field.value;
