@@ -192,6 +192,52 @@ Acceptance criteria:
 - Any planned raw SQL for frame data is justified by a missing package read surface.
 - No implementation slice begins by duplicating Smithers frame-codec behavior.
 
+#### Slice 1 inventory result — 2026-05-09
+
+Installed Smithers already exposes the frame reads needed for historical v1; CustomHarness should use those adapter methods rather than copying frame-codec behavior.
+
+Relevant Smithers package files:
+
+- `node_modules/@smithers-orchestrator/db/src/adapter.js`
+  - Read methods for current inspection: `getRun`, `listRuns`, `listNodes`, `listAttemptsForRun`, `listEventHistory`, `getLastEventSeq`, `getRawNodeOutputForIteration`.
+  - Frame methods: `getLastFrame`, `listFrames`, `listFrameChainDesc`, `inflateFrameRow`, `reconstructFrameXml`.
+  - Future read surfaces noted but out of v1: `listSignals`, `listPendingApprovals`, `listApprovalHistoryForNode`, `listPendingHumanRequests`, `listAlerts`, `listScorerResults`, `listCacheByNode`.
+- `node_modules/@smithers-orchestrator/db/src/index.d.ts`
+  - Exports `FrameRow` with `runId`, `frameNo`, `createdAtMs`, `xmlJson`, `xmlHash`, `encoding`, `mountedTaskIdsJson`, `taskIndexJson`, and `note`.
+  - Exports frame-codec helpers, but CustomHarness should not call them for normal inspection when adapter inflation is available.
+- `node_modules/@smithers-orchestrator/db/src/frame-codec.js`
+  - Implements `normalizeFrameEncoding`, `parseFrameDelta`, `applyFrameDelta`, and `applyFrameDeltaJson`; these are used by the adapter during inflation.
+- `node_modules/@smithers-orchestrator/graph/src/utils/xml.js`
+  - Exposes `parseXmlJson(json)` and `canonicalizeXml(node)` at runtime through the `@smithers-orchestrator/graph/utils/xml` subpath. Type declarations for that subpath may need a local shim if TypeScript import ergonomics fail.
+- Smithers examples that already read frames this way:
+  - `node_modules/@smithers-orchestrator/server/src/gatewayRoutes/getDevToolsSnapshot.js` uses `adapter.getLastFrame()` for the latest frame and `adapter.listFrames(...).find(...)` for a requested historical frame before parsing `xmlJson`.
+  - `node_modules/@smithers-orchestrator/server/src/gatewayRoutes/streamDevTools.js` obtains latest frames through the same adapter-backed route.
+  - `node_modules/@smithers-orchestrator/cli/src/tui/components/FramesPane.jsx` calls `adapter.listFrames(runId, 500)` and parses returned `xmlJson`.
+
+Frame inflation behavior:
+
+- Use `adapter.getLastFrame(runId)` for the default/latest historical graph source. It returns an inflated `FrameRow` because it calls `inflateFrameRow()`.
+- Use `adapter.listFrames(runId, limit, afterFrameNo?)` for multi-frame inspection. It inflates each returned row through `inflateFrameRow()` with a local cache.
+- Avoid exposing `adapter.listFrameChainDesc()` rows directly in CustomHarness API responses. That method returns raw frame rows and is useful to `reconstructFrameXml()`, but delta rows are not inflated unless passed through the adapter inflation path.
+- `inflateFrameRow(row)` normalizes `encoding`; when `encoding === "delta"`, it calls `reconstructFrameXml()` to walk back to a non-delta/keyframe and apply Smithers frame deltas.
+- `reconstructFrameXml()` is the canonical installed behavior for delta reconstruction. Do not implement a CustomHarness frame codec while this method is available.
+
+Current CustomHarness reader status:
+
+- `src/smithersProject/sqliteReadOnly.ts` opens `smithers.db` with `readonly: true`, sets `PRAGMA query_only = ON`, and creates a Smithers `SmithersDb` adapter over that handle.
+- `src/smithersProject/runReader.ts` already uses adapter APIs for most inspection reads: `listRuns`, `getRun`, `listNodes`, `listAttemptsForRun`, `listEventHistory`, `getLastEventSeq`, `getLastFrame`, and `getRawNodeOutputForIteration`.
+- The only current CustomHarness raw SQL is `listWorkflowRuns()` in `src/smithersProject/runReader.ts`, which filters `_smithers_runs` by workflow id/path because the installed adapter has no workflow-id-specific list method. This fallback is centralized behind the read-only handle and remains justified.
+- `toRunFrame()` currently receives `xmlJson` from Smithers but drops it. It preserves `taskIndexJson` and parsed `taskIndex`, but not parsed frame XML.
+- `listFrameMetadata()` currently uses `getLastFrame()` for `frameLimit === 1`, which is good, but uses `listFrameChainDesc()` for `frameLimit > 1`, which can expose non-inflated delta rows. Future code should switch multi-frame reads to `adapter.listFrames()` or explicitly inflate rows through the adapter.
+
+Gaps and implications for later slices:
+
+- No raw SQL is needed for latest-frame historical graph v1; use `getLastFrame()`.
+- No raw SQL is needed for multi-frame API responses if `listFrames()` is sufficient. Raw SQL should only be considered for a future exact `getFrame(runId, frameNo)` if `listFrames(...).find(...)` is inadequate.
+- CustomHarness must parse `FrameRow.xmlJson` into a parsed `xml` companion while preserving the original inflated `xmlJson`. Malformed XML JSON should create field-level parse warnings and not drop the run detail.
+- `taskIndexJson` may contain only minimal task entries (`nodeId`, `ordinal`, `iteration`) in current Smithers engine writes, so historical prompts/models/editor metadata may genuinely be unavailable. Later graph projection must show unknown/not captured instead of filling from current Workflow Source.
+- Broad output, approval, signal, snapshot, human-request, alert, scorer, and cache mapping remains future work unless required for the historical graph provenance fix.
+
 ### Slice 2 — broaden `SmithersRunReader` types
 
 Goal: make the internal TypeScript contract capable of carrying Smithers Run State without losing frame fidelity.

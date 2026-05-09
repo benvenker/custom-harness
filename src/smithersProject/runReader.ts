@@ -1,6 +1,15 @@
-import type { AttemptRow, NodeRow, RunRow } from '@smithers-orchestrator/db/adapter';
-import { basename, normalize, sep } from 'node:path';
-import { openSmithersDbReadOnly, type SmithersDbReadOnlyHandle, type SqliteReadOnlyOpenOptions } from './sqliteReadOnly.js';
+import type {
+  AttemptRow,
+  NodeRow,
+  RunRow,
+} from "@smithers-orchestrator/db/adapter";
+import type { XmlNode } from "@smithers-orchestrator/graph";
+import { basename, normalize, sep } from "node:path";
+import {
+  openSmithersDbReadOnly,
+  type SmithersDbReadOnlyHandle,
+  type SqliteReadOnlyOpenOptions,
+} from "./sqliteReadOnly.js";
 import type {
   GetRunDetailOptions,
   ListEventsOptions,
@@ -16,7 +25,7 @@ import type {
   SmithersRunOutput,
   SmithersRunReader,
   SmithersRunSummary,
-} from './runReaderTypes.js';
+} from "./runReaderTypes.js";
 
 type CreateSmithersRunReaderOptions = SqliteReadOnlyOpenOptions;
 
@@ -40,26 +49,36 @@ type EventHistoryRow = {
   payloadJson?: string | null;
 };
 
-type ParseContext = Omit<SmithersParseWarning, 'field' | 'message'>;
+type ParseContext = Omit<SmithersParseWarning, "field" | "message">;
 
-export function createSmithersRunReader(options: CreateSmithersRunReaderOptions): SmithersRunReader {
+export function createSmithersRunReader(
+  options: CreateSmithersRunReaderOptions
+): SmithersRunReader {
   return smithersRunReaderFromHandle(openSmithersDbReadOnly(options));
 }
 
-export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): SmithersRunReader {
+export function smithersRunReaderFromHandle(
+  handle: SmithersDbReadOnlyHandle
+): SmithersRunReader {
   let closed = false;
 
   function assertOpen() {
-    if (closed) throw new Error(`SmithersRunReader is closed: ${handle.dbPath}`);
+    if (closed)
+      throw new Error(`SmithersRunReader is closed: ${handle.dbPath}`);
   }
 
   return {
     async listRuns(options: ListRunsOptions = {}) {
       assertOpen();
       if (options.workflowId) {
-        return listWorkflowRuns(handle, options).map((row: RunRow) => toRunSummary(row, []));
+        return listWorkflowRuns(handle, options).map((row: RunRow) =>
+          toRunSummary(row, [])
+        );
       }
-      const rows = (await handle.adapter.listRuns(options.limit ?? 50, options.status)) as RunRow[];
+      const rows = (await handle.adapter.listRuns(
+        options.limit ?? 50,
+        options.status
+      )) as RunRow[];
       return rows.map((row: RunRow) => toRunSummary(row, []));
     },
 
@@ -68,23 +87,45 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
       const run = await handle.adapter.getRun(runId);
       if (!run) return null;
 
-      const eventLimit = clampPositiveInteger(options.eventLimit ?? 200, 1, 1000);
+      const eventLimit = clampPositiveInteger(
+        options.eventLimit ?? 200,
+        1,
+        1000
+      );
       const frameLimit = clampPositiveInteger(options.frameLimit ?? 1, 1, 100);
       const parseWarnings: SmithersParseWarning[] = [];
 
-      const [nodes, attempts, events, frames, lastEventSeq] = await Promise.all([
-        handle.adapter.listNodes(runId),
-        handle.adapter.listAttemptsForRun(runId),
-        handle.adapter.listEventHistory(runId, { afterSeq: options.eventsAfterSeq ?? -1, limit: eventLimit }),
-        listFrameMetadata(handle, runId, frameLimit),
-        handle.adapter.getLastEventSeq(runId),
-      ]) as [NodeRow[], AttemptRow[], Array<Record<string, unknown>>, FrameRow[], number | undefined];
+      const [nodes, attempts, events, frames, lastEventSeq] =
+        (await Promise.all([
+          handle.adapter.listNodes(runId),
+          handle.adapter.listAttemptsForRun(runId),
+          handle.adapter.listEventHistory(runId, {
+            afterSeq: options.eventsAfterSeq ?? -1,
+            limit: eventLimit,
+          }),
+          listFrameMetadata(handle, runId, frameLimit),
+          handle.adapter.getLastEventSeq(runId),
+        ])) as [
+          NodeRow[],
+          AttemptRow[],
+          Array<Record<string, unknown>>,
+          FrameRow[],
+          number | undefined,
+        ];
 
       const mappedNodes = nodes.map(toRunNode).sort(compareNodeRows);
-      const mappedAttempts = attempts.map((attempt: AttemptRow) => toRunAttempt(attempt, parseWarnings)).sort(compareAttemptRows);
-      const mappedEvents = events.map((event) => toRunEvent(runId, event, parseWarnings));
-      const mappedFrames = frames.map((frame: FrameRow) => toRunFrame(frame, parseWarnings));
-      const outputs = options.includeOutputs ? await listOutputs(handle, mappedNodes) : [];
+      const mappedAttempts = attempts
+        .map((attempt: AttemptRow) => toRunAttempt(attempt, parseWarnings))
+        .sort(compareAttemptRows);
+      const mappedEvents = events.map((event) =>
+        toRunEvent(runId, event, parseWarnings)
+      );
+      const mappedFrames = frames.map((frame: FrameRow) =>
+        toRunFrame(frame, parseWarnings)
+      );
+      const outputs = options.includeOutputs
+        ? await listOutputs(handle, mappedNodes)
+        : [];
 
       return {
         run: toRunSummary(run, parseWarnings),
@@ -111,7 +152,9 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
         }),
         handle.adapter.getLastEventSeq(runId),
       ]);
-      const events = (rows as Array<Record<string, unknown>>).map((event) => toRunEvent(runId, event, parseWarnings));
+      const events = (rows as Array<Record<string, unknown>>).map((event) =>
+        toRunEvent(runId, event, parseWarnings)
+      );
       return {
         events,
         cursors: eventCursor(events, lastEventSeq, options.afterSeq),
@@ -127,7 +170,10 @@ export function smithersRunReaderFromHandle(handle: SmithersDbReadOnlyHandle): S
   };
 }
 
-function toRunSummary(row: RunRow, parseWarnings: SmithersParseWarning[]): SmithersRunSummary {
+function toRunSummary(
+  row: RunRow,
+  parseWarnings: SmithersParseWarning[]
+): SmithersRunSummary {
   return {
     runId: row.runId,
     parentRunId: row.parentRunId,
@@ -141,9 +187,13 @@ function toRunSummary(row: RunRow, parseWarnings: SmithersParseWarning[]): Smith
     heartbeatAtMs: row.heartbeatAtMs,
     runtimeOwnerId: row.runtimeOwnerId,
     errorJson: row.errorJson,
-    error: parseJsonField(row.errorJson, 'run.errorJson', parseWarnings, { runId: row.runId }),
+    error: parseJsonField(row.errorJson, "run.errorJson", parseWarnings, {
+      runId: row.runId,
+    }),
     configJson: row.configJson,
-    config: parseJsonField(row.configJson, 'run.configJson', parseWarnings, { runId: row.runId }),
+    config: parseJsonField(row.configJson, "run.configJson", parseWarnings, {
+      runId: row.runId,
+    }),
   };
 }
 
@@ -161,8 +211,16 @@ function toRunNode(row: NodeRow): SmithersRunNode {
   };
 }
 
-function toRunAttempt(row: AttemptRow, parseWarnings: SmithersParseWarning[]): SmithersRunAttempt {
-  const context = { runId: row.runId, nodeId: row.nodeId, iteration: row.iteration, attempt: row.attempt };
+function toRunAttempt(
+  row: AttemptRow,
+  parseWarnings: SmithersParseWarning[]
+): SmithersRunAttempt {
+  const context = {
+    runId: row.runId,
+    nodeId: row.nodeId,
+    iteration: row.iteration,
+    attempt: row.attempt,
+  };
   return {
     runId: row.runId,
     nodeId: row.nodeId,
@@ -174,46 +232,93 @@ function toRunAttempt(row: AttemptRow, parseWarnings: SmithersParseWarning[]): S
     finishedAtMs: row.finishedAtMs,
     heartbeatAtMs: row.heartbeatAtMs,
     heartbeatDataJson: row.heartbeatDataJson,
-    heartbeatData: parseJsonField(row.heartbeatDataJson, 'attempt.heartbeatDataJson', parseWarnings, context),
+    heartbeatData: parseJsonField(
+      row.heartbeatDataJson,
+      "attempt.heartbeatDataJson",
+      parseWarnings,
+      context
+    ),
     errorJson: row.errorJson,
-    error: parseJsonField(row.errorJson, 'attempt.errorJson', parseWarnings, context),
+    error: parseJsonField(
+      row.errorJson,
+      "attempt.errorJson",
+      parseWarnings,
+      context
+    ),
     jjPointer: row.jjPointer,
     responseText: row.responseText,
     jjCwd: row.jjCwd,
     cached: row.cached,
     metaJson: row.metaJson,
-    meta: parseJsonField(row.metaJson, 'attempt.metaJson', parseWarnings, context),
+    meta: parseJsonField(
+      row.metaJson,
+      "attempt.metaJson",
+      parseWarnings,
+      context
+    ),
   };
 }
 
-function toRunFrame(row: FrameRow, parseWarnings: SmithersParseWarning[]): SmithersRunFrame {
+function toRunFrame(
+  row: FrameRow,
+  parseWarnings: SmithersParseWarning[]
+): SmithersRunFrame {
   const context = { runId: row.runId, frameNo: row.frameNo };
-  const mountedTaskIds = parseJsonField(row.mountedTaskIdsJson, 'frame.mountedTaskIdsJson', parseWarnings, context);
+  const mountedTaskIds = parseJsonField(
+    row.mountedTaskIdsJson,
+    "frame.mountedTaskIdsJson",
+    parseWarnings,
+    context
+  );
   return {
     runId: row.runId,
     frameNo: row.frameNo,
     createdAtMs: row.createdAtMs,
     xmlHash: row.xmlHash,
     encoding: row.encoding,
+    xmlJson: row.xmlJson,
+    xml: parseXmlField(row.xmlJson, "frame.xmlJson", parseWarnings, context),
     mountedTaskIdsJson: row.mountedTaskIdsJson,
-    mountedTaskIds: Array.isArray(mountedTaskIds) ? mountedTaskIds.filter((value): value is string => typeof value === 'string') : [],
+    mountedTaskIds: Array.isArray(mountedTaskIds)
+      ? mountedTaskIds.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [],
     taskIndexJson: row.taskIndexJson,
-    taskIndex: parseJsonField(row.taskIndexJson, 'frame.taskIndexJson', parseWarnings, context),
+    taskIndex: parseJsonField(
+      row.taskIndexJson,
+      "frame.taskIndexJson",
+      parseWarnings,
+      context
+    ),
     note: row.note,
   };
 }
 
-function toRunEvent(runId: string, row: Record<string, unknown>, parseWarnings: SmithersParseWarning[]): SmithersRunEvent {
+function toRunEvent(
+  runId: string,
+  row: Record<string, unknown>,
+  parseWarnings: SmithersParseWarning[]
+): SmithersRunEvent {
   const event = row as EventHistoryRow;
   const seq = Number(event.seq ?? 0);
-  const payloadJson = typeof event.payloadJson === 'string' ? event.payloadJson : 'null';
-  const payload = parseJsonField(payloadJson, 'event.payloadJson', parseWarnings, { runId, seq });
-  const payloadObject = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+  const payloadJson =
+    typeof event.payloadJson === "string" ? event.payloadJson : "null";
+  const payload = parseJsonField(
+    payloadJson,
+    "event.payloadJson",
+    parseWarnings,
+    { runId, seq }
+  );
+  const payloadObject =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload
+      : null;
   return {
-    runId: typeof event.runId === 'string' ? event.runId : runId,
+    runId: typeof event.runId === "string" ? event.runId : runId,
     seq,
     timestampMs: Number(event.timestampMs ?? 0),
-    type: String(event.type ?? ''),
+    type: String(event.type ?? ""),
     payloadJson,
     payload,
     nodeId: stringValue(payloadObject?.nodeId),
@@ -226,9 +331,9 @@ function parseJsonField(
   value: string | null | undefined,
   field: string,
   parseWarnings: SmithersParseWarning[],
-  context: ParseContext,
+  context: ParseContext
 ): SmithersJsonValue | null {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === null || value === undefined || value === "") return null;
   try {
     return JSON.parse(value) as SmithersJsonValue;
   } catch (error) {
@@ -241,25 +346,65 @@ function parseJsonField(
   }
 }
 
-async function listFrameMetadata(handle: SmithersDbReadOnlyHandle, runId: string, frameLimit: number): Promise<FrameRow[]> {
-  const lastFrame = await handle.adapter.getLastFrame(runId);
-  if (!lastFrame) return [];
-  if (frameLimit === 1) return [lastFrame as FrameRow];
-  const chain = await handle.adapter.listFrameChainDesc(runId, Number(lastFrame.frameNo), frameLimit);
-  return (chain as FrameRow[]).sort((a, b) => a.frameNo - b.frameNo);
+function parseXmlField(
+  value: string | null | undefined,
+  field: string,
+  parseWarnings: SmithersParseWarning[],
+  context: ParseContext
+): XmlNode | null {
+  const parsed = parseJsonField(value, field, parseWarnings, context);
+  return isXmlNode(parsed) ? parsed : null;
 }
 
-async function listOutputs(handle: SmithersDbReadOnlyHandle, nodes: SmithersRunNode[]): Promise<SmithersRunOutput[]> {
+function isXmlNode(value: unknown): value is XmlNode {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "text") return typeof record.text === "string";
+  if (record.kind !== "element") return false;
+  return (
+    typeof record.tag === "string" &&
+    isStringRecord(record.props) &&
+    Array.isArray(record.children) &&
+    record.children.every((child) => isXmlNode(child))
+  );
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value).every((entry) => typeof entry === "string");
+}
+
+async function listFrameMetadata(
+  handle: SmithersDbReadOnlyHandle,
+  runId: string,
+  frameLimit: number
+): Promise<FrameRow[]> {
+  const rows = await handle.adapter.listFrames(runId, frameLimit);
+  return (rows as FrameRow[]).sort((a, b) => a.frameNo - b.frameNo);
+}
+
+async function listOutputs(
+  handle: SmithersDbReadOnlyHandle,
+  nodes: SmithersRunNode[]
+): Promise<SmithersRunOutput[]> {
   const outputs: SmithersRunOutput[] = [];
   const seen = new Set<string>();
   for (const node of nodes) {
-    if (!node.outputTable || seen.has(`${node.outputTable}\0${node.runId}\0${node.nodeId}\0${node.iteration}`)) continue;
-    seen.add(`${node.outputTable}\0${node.runId}\0${node.nodeId}\0${node.iteration}`);
+    if (
+      !node.outputTable ||
+      seen.has(
+        `${node.outputTable}\0${node.runId}\0${node.nodeId}\0${node.iteration}`
+      )
+    )
+      continue;
+    seen.add(
+      `${node.outputTable}\0${node.runId}\0${node.nodeId}\0${node.iteration}`
+    );
     const row = await handle.adapter.getRawNodeOutputForIteration(
       node.outputTable,
       node.runId,
       node.nodeId,
-      node.iteration,
+      node.iteration
     );
     if (!row) continue;
     outputs.push({
@@ -273,7 +418,10 @@ async function listOutputs(handle: SmithersDbReadOnlyHandle, nodes: SmithersRunN
   return outputs;
 }
 
-function listWorkflowRuns(handle: SmithersDbReadOnlyHandle, options: ListRunsOptions): RunRow[] {
+function listWorkflowRuns(
+  handle: SmithersDbReadOnlyHandle,
+  options: ListRunsOptions
+): RunRow[] {
   const workflowId = options.workflowId;
   if (!workflowId) return [];
 
@@ -288,7 +436,7 @@ function listWorkflowRuns(handle: SmithersDbReadOnlyHandle, options: ListRunsOpt
   ];
 
   if (options.status) {
-    if (options.status === 'running') {
+    if (options.status === "running") {
       whereParts.push(`status IN ('running', 'continued')`);
     } else {
       whereParts.push(`status = ?`);
@@ -297,8 +445,9 @@ function listWorkflowRuns(handle: SmithersDbReadOnlyHandle, options: ListRunsOpt
   }
   params.push(limit);
 
-  type RunSqlRow = Omit<RunRow, 'status'> & { status: string };
-  return handle.queryAll<RunSqlRow>(`
+  type RunSqlRow = Omit<RunRow, "status"> & { status: string };
+  return handle.queryAll<RunSqlRow>(
+    `
     SELECT
       run_id AS runId,
       parent_run_id AS parentRunId,
@@ -314,10 +463,12 @@ function listWorkflowRuns(handle: SmithersDbReadOnlyHandle, options: ListRunsOpt
       error_json AS errorJson,
       config_json AS configJson
     FROM _smithers_runs
-    WHERE ${whereParts.join(' AND ')}
+    WHERE ${whereParts.join(" AND ")}
     ORDER BY created_at_ms DESC, run_id ASC
     LIMIT ?
-  `, params) as RunRow[];
+  `,
+    params
+  ) as RunRow[];
 }
 
 function matchesWorkflowId(row: RunRow, workflowId?: string) {
@@ -326,23 +477,42 @@ function matchesWorkflowId(row: RunRow, workflowId?: string) {
   const workflowPath = row.workflowPath;
   if (!workflowPath) return false;
   const normalized = normalize(workflowPath);
-  if (basename(normalized, '.tsx') === workflowId) return true;
-  return normalized.endsWith(`${sep}.smithers${sep}workflows${sep}${workflowId}.tsx`);
+  if (basename(normalized, ".tsx") === workflowId) return true;
+  return normalized.endsWith(
+    `${sep}.smithers${sep}workflows${sep}${workflowId}.tsx`
+  );
 }
 
 function escapeSqlLike(value: string) {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
-function eventCursor(events: SmithersRunEvent[], lastEventSeq?: number | null, requestedAfterSeq?: number) {
-  if (typeof lastEventSeq === 'number' && Number.isFinite(lastEventSeq)) {
-    return { nextEventSeq: typeof requestedAfterSeq === 'number' ? Math.max(lastEventSeq, requestedAfterSeq) : lastEventSeq };
+function eventCursor(
+  events: SmithersRunEvent[],
+  lastEventSeq?: number | null,
+  requestedAfterSeq?: number
+) {
+  if (typeof lastEventSeq === "number" && Number.isFinite(lastEventSeq)) {
+    return {
+      nextEventSeq:
+        typeof requestedAfterSeq === "number"
+          ? Math.max(lastEventSeq, requestedAfterSeq)
+          : lastEventSeq,
+    };
   }
   if (events.length === 0) {
-    return { nextEventSeq: typeof requestedAfterSeq === 'number' ? requestedAfterSeq : null };
+    return {
+      nextEventSeq:
+        typeof requestedAfterSeq === "number" ? requestedAfterSeq : null,
+    };
   }
   const maxEventSeq = Math.max(...events.map((event) => event.seq));
-  return { nextEventSeq: typeof requestedAfterSeq === 'number' ? Math.max(maxEventSeq, requestedAfterSeq) : maxEventSeq };
+  return {
+    nextEventSeq:
+      typeof requestedAfterSeq === "number"
+        ? Math.max(maxEventSeq, requestedAfterSeq)
+        : maxEventSeq,
+  };
 }
 
 function compareNodeRows(a: SmithersRunNode, b: SmithersRunNode) {
@@ -364,11 +534,11 @@ function clampPositiveInteger(value: number, min: number, max: number) {
 }
 
 function stringValue(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
+  return typeof value === "string" ? value : null;
 }
 
 function numberValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export type { CreateSmithersRunReaderOptions };
@@ -385,4 +555,4 @@ export type {
   SmithersRunOutput,
   SmithersRunReader,
   SmithersRunSummary,
-} from './runReaderTypes.js';
+} from "./runReaderTypes.js";

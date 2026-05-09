@@ -1,12 +1,12 @@
 export type SmithersRunStatus =
-  | 'running'
-  | 'waiting-approval'
-  | 'waiting-event'
-  | 'waiting-timer'
-  | 'finished'
-  | 'failed'
-  | 'cancelled'
-  | 'continued'
+  | "running"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "continued"
   | string;
 
 export type SmithersJsonValue =
@@ -16,6 +16,18 @@ export type SmithersJsonValue =
   | string
   | SmithersJsonValue[]
   | { [key: string]: SmithersJsonValue };
+
+export type SmithersXmlNode =
+  | {
+      readonly kind: "element";
+      readonly tag: string;
+      readonly props: Record<string, string>;
+      readonly children: readonly SmithersXmlNode[];
+    }
+  | {
+      readonly kind: "text";
+      readonly text: string;
+    };
 
 export type SmithersParseWarning = {
   field: string;
@@ -86,6 +98,8 @@ export type SmithersRunFrame = {
   createdAtMs: number;
   xmlHash: string;
   encoding: string;
+  xmlJson: string;
+  xml: SmithersXmlNode | null;
   mountedTaskIdsJson: string | null;
   mountedTaskIds: string[];
   taskIndexJson: string | null;
@@ -158,7 +172,13 @@ export type ListEventsOptions = {
 
 export type SmithersRunReader = {
   listRuns(options?: ListRunsOptions): Promise<SmithersRunSummary[]>;
-  getRunDetail(runId: string, options?: GetRunDetailOptions): Promise<SmithersRunDetail | null>;
-  listEvents(runId: string, options?: ListEventsOptions): Promise<SmithersRunEventsResult>;
+  getRunDetail(
+    runId: string,
+    options?: GetRunDetailOptions
+  ): Promise<SmithersRunDetail | null>;
+  listEvents(
+    runId: string,
+    options?: ListEventsOptions
+  ): Promise<SmithersRunEventsResult>;
   close(): void;
 };
