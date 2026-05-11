@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>custom-harness — Smithers durable outcome runner</title>
+<title>custom-harness — Smithers workflow workbench</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -861,6 +861,16 @@
     max-height: 280px;
     overflow: auto;
   }
+  .workflow-select {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 9px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    max-width: 240px;
+  }
+  .workflow-select[hidden] { display: none; }
   .output-meta {
     font-family: var(--mono);
     font-size: 10px;
@@ -1047,10 +1057,24 @@
     line-height: 1.55;
   }
   .output-markdown {
-    white-space: pre-wrap;
+    white-space: normal;
     overflow-wrap: anywhere;
     word-break: normal;
   }
+  .output-markdown h2,
+  .output-markdown h3,
+  .output-markdown h4,
+  .output-markdown p,
+  .output-markdown ul { margin: 0 0 12px; }
+  .output-markdown h2,
+  .output-markdown h3,
+  .output-markdown h4 { font-family: var(--serif); line-height: 1.15; }
+  .output-markdown h2 { font-size: 24px; }
+  .output-markdown h3 { font-size: 20px; }
+  .output-markdown h4 { font-size: 17px; }
+  .output-markdown ul { padding-left: 22px; }
+  .output-markdown code { font-family: var(--mono); font-size: .84em; background: var(--bone-2); border: 1px solid var(--hair); padding: 1px 4px; }
+  .output-markdown .md-gap { height: 6px; }
   .output-markdown pre {
     font-family: var(--mono);
     font-size: 12px;
@@ -1121,6 +1145,7 @@
     <textarea class="goal-edit" id="goalInput" rows="2">Audit AGENTS.md and README.md for stale references and propose a unified rewrite.</textarea>
     <div class="goal-row">
       <div class="goal-actions">
+        <select class="workflow-select" id="workflowSelect" aria-label="Select Smithers workflow" hidden></select>
         <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
         <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
         <button class="btn ghost" id="runWorkflowBtn" disabled title="Start a full Smithers run from the selected workflow file">Start Full Run</button>
@@ -1427,6 +1452,7 @@
   const canvasSvg   = document.getElementById("canvasSvg");
   const inspector   = document.getElementById("inspectorContent");
   const runsSelect  = document.getElementById("runsSelect");
+  const workflowSelect = document.getElementById("workflowSelect");
   const goalInput   = document.getElementById("goalInput");
   const inputStepLabel = document.getElementById("inputStepLabel");
   const inputHelpLabel = document.getElementById("inputHelpLabel");
@@ -1632,13 +1658,14 @@
   function markdownFromOutputRow(output) {
     const row = output?.row;
     if (!row || typeof row !== "object") return "";
-    for (const key of ["markdown", "text", "response", "result"]) {
-      if (typeof row[key] === "string") return row[key];
+    for (const key of ["markdown", "text", "response", "result", "formatted_plan", "formattedPlan", "improved_plan", "improvedPlan", "final_plan", "finalPlan"]) {
+      if (typeof row[key] === "string" && row[key].trim()) return row[key];
     }
     const parsed = {};
     for (const [key, value] of Object.entries(row)) {
       if (["run_id", "node_id", "iteration"].includes(key)) continue;
-      parsed[key] = parseOutputValue(value);
+      const nextValue = parseOutputValue(value);
+      if (nextValue !== null && nextValue !== undefined && nextValue !== "") parsed[key] = nextValue;
     }
     const parts = [];
     if (parsed.title) parts.push(`# ${parsed.title}`);
@@ -1665,7 +1692,57 @@
   }
 
   function renderMarkdownLite(markdown) {
-    return `<pre>${escapeHtml(markdown)}</pre>`;
+    const lines = String(markdown || "").replace(/\\n/g, "\n").split(/\r?\n/);
+    const html = [];
+    let listOpen = false;
+    const closeList = () => {
+      if (listOpen) {
+        html.push("</ul>");
+        listOpen = false;
+      }
+    };
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+      if (heading) {
+        closeList();
+        const level = Math.min(4, heading[1].length + 1);
+        html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+        continue;
+      }
+      const bullet = /^[-*]\s+(.+)$/.exec(line);
+      if (bullet) {
+        if (!listOpen) {
+          html.push("<ul>");
+          listOpen = true;
+        }
+        html.push(`<li>${inlineMarkdown(bullet[1])}</li>`);
+        continue;
+      }
+      const numbered = /^\d+[.)]\s+(.+)$/.exec(line);
+      if (numbered) {
+        if (!listOpen) {
+          html.push("<ul>");
+          listOpen = true;
+        }
+        html.push(`<li>${inlineMarkdown(numbered[1])}</li>`);
+        continue;
+      }
+      closeList();
+      if (!line.trim()) {
+        html.push(`<div class="md-gap"></div>`);
+      } else {
+        html.push(`<p>${inlineMarkdown(line)}</p>`);
+      }
+    }
+    closeList();
+    return html.join("");
+  }
+
+  function inlineMarkdown(text) {
+    return escapeHtml(text)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   }
 
   function openOutputViewer(nodeId) {
@@ -2066,7 +2143,7 @@
 
   function renderProjectReadOnlyNote(state) {
     if (state.structuredFields?.length > 0) return "";
-    return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
+    return `<div class="node-edit-note">No editable editor metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
   }
 
   function isHistoricalRunInspection() {
@@ -2564,26 +2641,7 @@
   }
 
   async function runWithEdits() {
-    if (!currentRunId) return;
-    const overrides = pendingOverridesForRun(currentRunId);
-    if (Object.keys(overrides).length === 0) return;
-    setRunButtonsBusy(true);
-    setRunActionStatus(`Forking ${shortId(currentRunId)} with ${Object.keys(overrides).length} edit(s)...`);
-    try {
-      const result = await postJson(`/api/runs/${encodeURIComponent(currentRunId)}/rerun`, {
-        promptOverrides: overrides,
-      });
-      setRunActionStatus(`Forked as ${shortId(result.runId)} · ${result.status}`,
-        result.status === "succeeded" ? "ok" : result.status === "failed" ? "error" : "");
-      // Drafts on the parent run are discarded once we land on the fork; the
-      // forked run.json now carries them as its baseline.
-      promptDrafts.delete(currentRunId);
-      await refreshRuns(result.runId);
-    } catch (err) {
-      setRunActionStatus(`Run with edits failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy prompt-override reruns were removed. Save source-backed edits, then start a new Smithers project run.", "error");
   }
 
   function loadSample(key) {
@@ -2961,17 +3019,6 @@
     }
   }
 
-  async function waitForRunToRender(runId) {
-    setCurrentRunId(runId);
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await refreshRuns();
-      const runMeta = await loadRun(runId, { silent: true, preserveStatus: true });
-      if (runMeta) return runMeta;
-      await new Promise(resolve => setTimeout(resolve, 750));
-    }
-    throw new Error("run artifacts not ready");
-  }
-
   function startProjectRunInspection({ runId, inspectionUrl, initialStatus }) {
     projectRunInspectionSeq += 1;
     const seq = projectRunInspectionSeq;
@@ -3090,24 +3137,7 @@
   }
 
   async function startRunFromGoal() {
-    const goal = goalInput.value.trim();
-    if (!goal) {
-      setRunActionStatus("Goal required", "error");
-      return;
-    }
-
-    setRunButtonsBusy(true);
-    setRunActionStatus("Starting run...");
-    try {
-      const result = await postJson("/api/runs", { goal });
-      setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`);
-      const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
-    } catch (err) {
-      setRunActionStatus(`Run failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy goal-planner runner was removed. Open a Smithers project workflow and use Start Full Run.", "error");
   }
 
   async function cancelProjectRun() {
@@ -3176,78 +3206,11 @@
       return;
     }
 
-    if (!currentRunMeta?.isSmithersWorkflow || !currentRunMeta.workflowPath) {
-      setRunActionStatus("Load a Smithers workflow run first", "error");
-      return;
-    }
-    const sourceRunId = currentRunId;
-    setRunButtonsBusy(true);
-    setRunActionStatus(`Starting fresh run from ${currentRunMeta.workflowPath.split("/").pop()}...`);
-    try {
-      // Bundle any pending studio edits with whatever overrides the parent
-      // already had baked in. New (drafts) win over inherited.
-      const drafts = sourceRunId ? pendingOverridesForRun(sourceRunId) : {};
-      const inherited = currentRunMeta.existingOverrides ?? {};
-      const merged = { ...inherited, ...drafts };
-      const promptOverrides = Object.keys(merged).length > 0 ? merged : undefined;
-
-      const payload = {
-        workflowPath: currentRunMeta.workflowPath,
-        input: currentRunMeta.input ?? {},
-        ...(currentRunMeta.goal ? { goal: currentRunMeta.goal } : {}),
-        ...(promptOverrides ? { promptOverrides } : {}),
-      };
-      const result = await postJson("/api/smithers-runs", payload);
-      // Drafts on the source run are what we just shipped; clear them so the
-      // studio bar resets if the user returns to the parent.
-      if (sourceRunId) promptDrafts.delete(sourceRunId);
-      setRunActionStatus(`Started ${shortId(result.runId)} · loading...`);
-      // RUN WORKFLOW means "start a fresh experiment" — auto-switch to the new
-      // run so the user actually sees something change. (Rerun Selected stays
-      // sticky because that fork's task states would look like regressions.)
-      const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`${shortId(result.runId)} · ${runMeta.status}`,
-        runStatusKind(runMeta.status));
-    } catch (err) {
-      setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy Smithers-run wrapper was removed. Open a project workflow and use Start Full Run.", "error");
   }
 
   async function rerunCurrentRun() {
-    if (projectModeAvailable) {
-      setRunActionStatus("Rerun Selected is for legacy runs. Use Start Full Run for this Smithers workflow.", "error");
-      return;
-    }
-    if (!currentRunId) {
-      setRunActionStatus("Select a run first", "error");
-      return;
-    }
-
-    const sourceRunId = currentRunId;
-    setRunButtonsBusy(true);
-    setRunActionStatus(`Forking ${shortId(sourceRunId)}...`);
-    try {
-      const result = await postJson(`/api/runs/${encodeURIComponent(sourceRunId)}/rerun`, {});
-      // Don't auto-switch the user onto the brand-new fork. A freshly-started
-      // fork has no events yet, so the DAG would render every previously-failed
-      // task as 'pending' — which looks like the parent's state regressed.
-      // Refresh the dropdown so the new id is selectable, and tell the user
-      // it's there.
-      await refreshRuns();
-      setRunActionStatus(`Forked as ${shortId(result.runId)} ·`,
-        result.status === "failed" ? "error" : "ok",
-        result.runId);
-    } catch (err) {
-      setRunActionStatus(`Rerun failed · ${err.message}`, "error");
-      await refreshRuns();
-      if (currentRunId === sourceRunId) {
-        await loadRun(sourceRunId, { silent: true, preserveStatus: true });
-      }
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy rerun/fork artifacts were removed. Start a new Smithers project run instead.", "error");
   }
 
   function renderSourceEditor() {
@@ -3306,7 +3269,26 @@
     }
   }
 
-  async function loadProjectWorkflowMode() {
+  function populateWorkflowSelect(workflows, selected) {
+    if (!workflowSelect) return;
+    const rows = Array.isArray(workflows) ? workflows : [];
+    workflowSelect.hidden = rows.length === 0;
+    workflowSelect.innerHTML = rows
+      .map(workflow => `<option value="${escapeHtml(workflow.id)}" ${workflow.id === selected ? "selected" : ""}>${escapeHtml(workflow.id)}</option>`)
+      .join("");
+  }
+
+  function clearProjectWorkflowMode() {
+    projectModeAvailable = false;
+    currentProject = null;
+    currentWorkflowId = null;
+    currentWorkflowGraph = null;
+    projectNodeOutputs.clear();
+    projectNodeOutputTables.clear();
+    populateWorkflowSelect([], null);
+  }
+
+  async function loadProjectWorkflowMode(preferredWorkflowId = null) {
     try {
       const project = await fetch("/api/project", { cache: "no-store" }).then(r => r.ok ? r.json() : null);
       if (!project || project.ok === false) {
@@ -3318,18 +3300,36 @@
         setRunActionStatus(workflows.error || "Could not load workflows", "error");
         return false;
       }
-      const selected = project.defaultWorkflowId
-        || workflows.workflows?.[0]?.id;
-      if (!selected) return false;
+      const available = workflows.workflows ?? [];
+      const selected = preferredWorkflowId && available.some(workflow => workflow.id === preferredWorkflowId)
+        ? preferredWorkflowId
+        : project.defaultWorkflowId
+          || available[0]?.id;
+      if (!selected) {
+        clearProjectWorkflowMode();
+        return false;
+      }
+      const previousProjectInput = goalInput.value;
       goalInput.value = loadStoredProjectInput(selected);
-      const graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      let graphResponse;
+      try {
+        graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      } catch (err) {
+        goalInput.value = previousProjectInput;
+        clearProjectWorkflowMode();
+        setRunActionStatus(`Could not render workflow graph · ${err.message}`, "error");
+        return false;
+      }
       if (graphResponse.ok === false) {
+        goalInput.value = previousProjectInput;
+        clearProjectWorkflowMode();
         setRunActionStatus(graphResponse.error || "Could not render workflow graph", "error");
         return false;
       }
       projectModeAvailable = true;
-      currentProject = { ...project, workflows: workflows.workflows ?? [] };
+      currentProject = { ...project, workflows: available };
       currentWorkflowId = selected;
+      populateWorkflowSelect(available, selected);
       currentWorkflowGraph = graphResponse.graph;
       rememberProjectOutputTables(graphResponse.graph);
       await renderProjectGraphForCurrentState({
@@ -3351,6 +3351,7 @@
       return true;
     } catch (err) {
       console.warn("project workflow mode unavailable", err);
+      clearProjectWorkflowMode();
       return false;
     }
   }
@@ -3378,7 +3379,13 @@
   function currentProjectInput() {
     const requestText = currentProjectInputText();
     console.log("[project-input]", requestText);
-    return requestText.trim() ? { request: requestText, prompt: requestText } : {};
+    // The current v0 workbench has one generic runtime-input textarea. Send
+    // common aliases so generated workflows that named their primary input
+    // `plan`, `idea`, or `text` still receive the user's value until the UI is
+    // schema-aware.
+    return requestText.trim()
+      ? { request: requestText, prompt: requestText, plan: requestText, idea: requestText, text: requestText }
+      : {};
   }
 
   function rememberProjectOutputTables(graph) {
@@ -3435,6 +3442,18 @@
     saveStoredProjectInput(currentWorkflowId, goalInput.value);
     clearTimeout(projectInputRefreshTimer);
     projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
+  });
+
+  workflowSelect?.addEventListener("change", async () => {
+    const nextWorkflowId = workflowSelect.value;
+    if (!nextWorkflowId || nextWorkflowId === currentWorkflowId) return;
+    stopProjectRunInspection();
+    currentRunMeta = null;
+    currentWorkflowGraph = null;
+    projectNodeOutputs.clear();
+    projectNodeOutputTables.clear();
+    setRunActionStatus(`Loading workflow ${nextWorkflowId}...`);
+    await loadProjectWorkflowMode(nextWorkflowId);
   });
 
   // ============ Wiring ============

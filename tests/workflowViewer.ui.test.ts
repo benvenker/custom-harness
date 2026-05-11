@@ -444,8 +444,8 @@ function smithersRunDetailFixture(
   };
 }
 
-describe("workflow viewer studio inspector state", () => {
-  it("keeps project workflow tasks without studio metadata read-only while exposing rendered prompt preview and source fallback", async () => {
+describe("workflow viewer editor inspector state", () => {
+  it("keeps project workflow tasks without editor metadata read-only while exposing rendered prompt preview and source fallback", async () => {
     const state = await projectInspectorState({
       id: "plain-task",
       type: "task",
@@ -564,14 +564,15 @@ describe("workflow viewer studio inspector state", () => {
 
   it("web source-value seeding reads meta.editor, not the removed meta.studio path", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const helper = html.match(
-      /function sourceValuesByPathForNode\(node\) \{(?<body>[\s\S]*?)\n  function buildFallbackProjectInspectorState/
-    )?.groups?.body ?? "";
+    const helper =
+      html.match(
+        /function sourceValuesByPathForNode\(node\) \{(?<body>[\s\S]*?)\n  function buildFallbackProjectInspectorState/
+      )?.groups?.body ?? "";
     expect(helper).toContain("node?.smithers?.meta?.editor");
     expect(helper).not.toContain("meta?.studio");
   });
 
-  it("does not make a project workflow task editable unless studio metadata explicitly enables a supported field", async () => {
+  it("does not make a project workflow task editable unless editor metadata explicitly enables a supported field", async () => {
     const state = await projectInspectorState(
       {
         id: "variant-claude",
@@ -725,30 +726,32 @@ describe("project workflow live run inspection helpers", () => {
 
   it("keeps waitForRunToRender out of the project Start Full Run branch", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const branchMatch = html.match(
-      /if \(currentWorkflowId\) \{(?<body>[\s\S]*?)\n    \}\n\n    if \(!currentRunMeta/
-    );
-    expect(branchMatch?.groups?.body ?? "").not.toContain(
-      "waitForRunToRender("
-    );
+    const runWorkflowFresh =
+      html.match(
+        /async function runWorkflowFresh\(\) \{(?<body>[\s\S]*?)\n  async function rerunCurrentRun/
+      )?.groups?.body ?? "";
+    expect(runWorkflowFresh).not.toContain("waitForRunToRender(");
   });
 
   it("does not auto-load a just-started project run as historical inspection before live polling", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const branchMatch = html.match(
-      /if \(currentWorkflowId\) \{(?<body>[\s\S]*?)\n    \}\n\n    if \(!currentRunMeta/
+    const runWorkflowFresh =
+      html.match(
+        /async function runWorkflowFresh\(\) \{(?<body>[\s\S]*?)\n  async function rerunCurrentRun/
+      )?.groups?.body ?? "";
+    expect(runWorkflowFresh).toContain("startProjectRunInspection({");
+    expect(runWorkflowFresh).toContain("await refreshProjectRuns();");
+    expect(runWorkflowFresh).not.toContain(
+      "await refreshProjectRuns(result.runId)"
     );
-    const branch = branchMatch?.groups?.body ?? "";
-    expect(branch).toContain("startProjectRunInspection({");
-    expect(branch).toContain("await refreshProjectRuns();");
-    expect(branch).not.toContain("await refreshProjectRuns(result.runId)");
   });
 
   it("cancels active live polling before loading a historical project run", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const loadProjectRun = html.match(
-      /async function loadProjectRun\(runId\) \{(?<body>[\s\S]*?)\n  async function loadRun/
-    )?.groups?.body ?? "";
+    const loadProjectRun =
+      html.match(
+        /async function loadProjectRun\(runId\) \{(?<body>[\s\S]*?)\n  async function loadRun/
+      )?.groups?.body ?? "";
     expect(loadProjectRun).toContain("stopProjectRunInspection();");
     expect(loadProjectRun).toContain("liveSmithers: false");
     expect(loadProjectRun).not.toContain("...(currentRunMeta || {})");
@@ -756,9 +759,10 @@ describe("project workflow live run inspection helpers", () => {
 
   it("guards live poll UI mutations so stale polling cannot overwrite a selected historical run", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const pollBody = html.match(
-      /async function pollProjectRunInspectionOnce\(seq\) \{(?<body>[\s\S]*?)\n  function attachOutputMetadata/
-    )?.groups?.body ?? "";
+    const pollBody =
+      html.match(
+        /async function pollProjectRunInspectionOnce\(seq\) \{(?<body>[\s\S]*?)\n  function attachOutputMetadata/
+      )?.groups?.body ?? "";
     expect(pollBody).toContain("currentRunId !== state.runId");
     expect(pollBody).toContain("projectRunInspection !== state");
     expect(pollBody).toContain("currentRunMeta?.liveSmithers !== true");
@@ -767,43 +771,55 @@ describe("project workflow live run inspection helpers", () => {
 
   it("checks live freshness inside project graph rendering before mutating UI", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const renderHelper = html.match(
-      /async function renderProjectGraphForCurrentState\(\{(?<body>[\s\S]*?)\n  async function renderHistoricalProjectRunGraph/
-    )?.groups?.body ?? "";
-    const guardIndex = renderHelper.indexOf("if (shouldApply && !shouldApply()) return decision;");
-    const firstMutationIndex = renderHelper.indexOf("SAMPLES._project = decision.graph");
+    const renderHelper =
+      html.match(
+        /async function renderProjectGraphForCurrentState\(\{(?<body>[\s\S]*?)\n  async function renderHistoricalProjectRunGraph/
+      )?.groups?.body ?? "";
+    const guardIndex = renderHelper.indexOf(
+      "if (shouldApply && !shouldApply()) return decision;"
+    );
+    const firstMutationIndex = renderHelper.indexOf(
+      "SAMPLES._project = decision.graph"
+    );
     expect(guardIndex).toBeGreaterThan(-1);
     expect(firstMutationIndex).toBeGreaterThan(guardIndex);
   });
 
   it("only enables Stop Run for the selected live project run", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const cancellable = html.match(
-      /function activeProjectRunIsCancellable\(\) \{(?<body>[\s\S]*?)\n  function stopProjectRunInspection/
-    )?.groups?.body ?? "";
+    const cancellable =
+      html.match(
+        /function activeProjectRunIsCancellable\(\) \{(?<body>[\s\S]*?)\n  function stopProjectRunInspection/
+      )?.groups?.body ?? "";
     expect(cancellable).toContain("currentRunMeta?.liveSmithers === true");
-    expect(cancellable).toContain("projectRunInspection.runId === currentRunId");
+    expect(cancellable).toContain(
+      "projectRunInspection.runId === currentRunId"
+    );
   });
 
   it("labels the project preview as current Workflow Source provenance", () => {
     const html = readFileSync("web/index.html", "utf8");
     expect(html).toContain("Current Workflow Source preview");
-    expect(html).toContain('meta.status === "preview" || meta.status === "project"');
+    expect(html).toContain(
+      'meta.status === "preview" || meta.status === "project"'
+    );
   });
 
   it("switches back to current preview before re-rendering source edits instead of mixing with selected runs", () => {
     const html = readFileSync("web/index.html", "utf8");
-    const refreshBody = html.match(
-      /async function refreshProjectGraphFromInput\(\) \{(?<body>[\s\S]*?)\n  let projectInputRefreshTimer/
-    )?.groups?.body ?? "";
+    const refreshBody =
+      html.match(
+        /async function refreshProjectGraphFromInput\(\) \{(?<body>[\s\S]*?)\n  let projectInputRefreshTimer/
+      )?.groups?.body ?? "";
     expect(refreshBody).toContain("enterCurrentWorkflowSourcePreview();");
     expect(refreshBody).toContain("liveMode: false");
     expect(refreshBody).toContain("liveDetail: null");
     expect(refreshBody).not.toContain("currentRunMeta?.smithersRunDetail");
 
-    const previewSwitch = html.match(
-      /function enterCurrentWorkflowSourcePreview\(\) \{(?<body>[\s\S]*?)\n\n  async function loadProjectRun/
-    )?.groups?.body ?? "";
+    const previewSwitch =
+      html.match(
+        /function enterCurrentWorkflowSourcePreview\(\) \{(?<body>[\s\S]*?)\n\n  async function loadProjectRun/
+      )?.groups?.body ?? "";
     expect(previewSwitch).toContain("stopProjectRunInspection();");
     expect(previewSwitch).toContain("currentRunMeta = null;");
     expect(previewSwitch).toContain("setCurrentRunId(null);");
@@ -813,7 +829,8 @@ describe("project workflow live run inspection helpers", () => {
 
 describe("project workflow live render state helpers", () => {
   it("uses the frame-backed view.graph for historical Smithers runs instead of the current preview graph", async () => {
-    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const { deriveHistoricalProjectRunGraph } =
+      await loadProjectLiveStateHelper();
     const currentPreviewGraph = previewGraphForOverlay([
       previewTaskNode({
         id: "current-source-only",
@@ -857,7 +874,10 @@ describe("project workflow live render state helpers", () => {
       },
     });
 
-    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: "foo" });
+    const decision = deriveHistoricalProjectRunGraph({
+      detail,
+      workflowId: "foo",
+    });
 
     expect(decision.mode).toBe("historical-frame");
     expect(decision.graph?.runId).toBe("historical-run");
@@ -870,16 +890,27 @@ describe("project workflow live render state helpers", () => {
     );
     expect(decision.provenance.label).toContain("Smithers Run Frame");
     expect(decision.provenance.label).toContain("frame 7");
-    expect(decision.visibleCopy).toContain("Smithers Run Frame · historical run");
+    expect(decision.visibleCopy).toContain(
+      "Smithers Run Frame · historical run"
+    );
     expect(decision.visibleCopy).toContain("frame 7");
-    expect(decision.graph?.nodes.map((node) => node.id)).toContain("historical-node");
-    expect(decision.graph?.nodes.map((node) => node.id)).not.toContain("current-source-only");
-    expect(JSON.stringify(decision.graph)).not.toContain("Current Workflow Source");
-    expect(JSON.stringify(currentPreviewGraph)).toContain("Current Workflow Source");
+    expect(decision.graph?.nodes.map((node) => node.id)).toContain(
+      "historical-node"
+    );
+    expect(decision.graph?.nodes.map((node) => node.id)).not.toContain(
+      "current-source-only"
+    );
+    expect(JSON.stringify(decision.graph)).not.toContain(
+      "Current Workflow Source"
+    );
+    expect(JSON.stringify(currentPreviewGraph)).toContain(
+      "Current Workflow Source"
+    );
   });
 
   it("returns an explicit historical unavailable graph instead of falling back to the preview graph", async () => {
-    const { deriveHistoricalProjectRunGraph } = await loadProjectLiveStateHelper();
+    const { deriveHistoricalProjectRunGraph } =
+      await loadProjectLiveStateHelper();
     const detail = smithersRunDetailFixture({
       run: { runId: "historical-run", status: "finished", workflowName: "foo" },
       view: {
@@ -893,7 +924,10 @@ describe("project workflow live render state helpers", () => {
       },
     });
 
-    const decision = deriveHistoricalProjectRunGraph({ detail, workflowId: "foo" });
+    const decision = deriveHistoricalProjectRunGraph({
+      detail,
+      workflowId: "foo",
+    });
 
     expect(decision.mode).toBe("historical-unavailable");
     expect(decision.error).toMatch(/missing|malformed/i);
@@ -901,11 +935,17 @@ describe("project workflow live render state helpers", () => {
       expect.objectContaining({
         id: "historical-graph-unavailable",
         title: "Historical graph unavailable",
-        prompt: expect.stringContaining("No current Workflow Source graph fallback"),
+        prompt: expect.stringContaining(
+          "No current Workflow Source graph fallback"
+        ),
       }),
     ]);
-    expect(decision.provenance.label).toContain("Smithers Run Frame unavailable");
-    expect(decision.visibleCopy).toContain("No current Workflow Source graph fallback was used.");
+    expect(decision.provenance.label).toContain(
+      "Smithers Run Frame unavailable"
+    );
+    expect(decision.visibleCopy).toContain(
+      "No current Workflow Source graph fallback was used."
+    );
   });
 
   it("renders a refreshed preview graph through the DB overlay when live Smithers detail exists", async () => {
@@ -1020,7 +1060,9 @@ describe("project workflow live render state helpers", () => {
 
     expect(decision.mode).toBe("live");
     expect(decision.provenance.status).toBe("cancelled");
-    expect(decision.graph?.nodes.find((node) => node.id === "ui-task")?.status).toBe("failed");
+    expect(
+      decision.graph?.nodes.find((node) => node.id === "ui-task")?.status
+    ).toBe("failed");
     expect(decision.visibleCopy).toContain("raw status: cancelled");
     expect(decision.visibleCopy).not.toContain("raw status: in-progress");
   });

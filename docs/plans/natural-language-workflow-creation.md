@@ -7,7 +7,7 @@ Let a user or agent describe the workflow they want in natural language and get 
 The draft must be an ordinary Smithers workflow-pack artifact, not a CustomHarness-only graph IR:
 
 - source lives in `.smithers/workflows/*.tsx`
-- prompt/model/label edits are source-backed and use the same Studio controls we already have
+- prompt/model/label edits are source-backed and use the same Workbench controls we already have
 - graph preview is produced by Smithers render APIs
 - runs execute through Smithers and persist in Smithers SQLite
 - historical inspection remains frame-backed/read-only
@@ -120,7 +120,7 @@ A draft is ordinary Smithers source plus provenance docs:
 ```txt
 .smithers/workflows/<workflow-id>.tsx
 .smithers/docs/workflows/<workflow-id>.md
-.poolside/workflows/creation-traces/<workflow-id>/<timestamp>.md   # optional trace/eval material
+.smithers/workbench/creation-traces/<workflow-id>/<timestamp>.md   # optional trace/eval material
 ```
 
 No CustomHarness draft database is required for the MVP.
@@ -150,9 +150,10 @@ const editable = {
     primary: { model: "openai/gpt-5.5" },
   },
   tasks: {
-    "reproduce": {
+    reproduce: {
       label: "Reproduce",
-      prompt: "Reproduce the issue from {{userPrompt}} and capture exact steps.",
+      prompt:
+        "Reproduce the issue from {{userPrompt}} and capture exact steps.",
     },
   },
 } as const;
@@ -329,7 +330,14 @@ type WorkflowDraftSpec = {
     model: string;
   }>;
   nodes: Array<
-    | { type: "task"; id: string; label: string; agentId: string; prompt: string; outputs?: string[] }
+    | {
+        type: "task";
+        id: string;
+        label: string;
+        agentId: string;
+        prompt: string;
+        outputs?: string[];
+      }
     | { type: "parallel"; id: string; children: string[] }
     | { type: "sequence"; id: string; children: string[] }
   >;

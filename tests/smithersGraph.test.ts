@@ -1,20 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import React from "react";
-import { Effect } from "effect";
-import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { renderFrame } from "@smithers-orchestrator/engine";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import type {
   GraphSnapshot,
   TaskDescriptor,
   XmlNode,
 } from "@smithers-orchestrator/graph";
 import { smithersSnapshotToRenderGraph } from "../src/runs/smithersGraph.js";
-import { createRunRecorder } from "../src/runs/recorder.js";
 
 function task(
   nodeId: string,
@@ -271,89 +261,6 @@ describe("Smithers graph snapshot mapper", () => {
       from: "feature-worktree",
       to: "inside",
       label: "",
-    });
-  });
-
-  it("writes plan.json from a real renderFrame snapshot without depending on the planner workflow DSL layout", async () => {
-    const runsDir = mkdtempSync(
-      join(tmpdir(), "custom-harness-smithers-graph-")
-    );
-    const recorder = createRunRecorder(
-      "frame-plan-test",
-      { goal: "frame graph" },
-      { runsDir }
-    );
-    const schemas = { task: z.object({ result: z.string() }) };
-    const { Workflow, Task, Sequence, Parallel, smithers, outputs } =
-      createSmithers(schemas);
-    const agent = {
-      id: "fake-agent",
-      generate: async () => ({ text: JSON.stringify({ result: "ok" }) }),
-    };
-    const workflow = smithers(() =>
-      React.createElement(
-        Workflow,
-        { name: "native-frame" },
-        React.createElement(
-          Sequence,
-          {},
-          React.createElement(
-            Task,
-            { id: "plan", output: outputs.task, agent },
-            "Plan prompt"
-          ),
-          React.createElement(
-            Parallel,
-            {},
-            React.createElement(
-              Task,
-              { id: "left", output: outputs.task, agent },
-              "Left prompt"
-            ),
-            React.createElement(
-              Task,
-              { id: "right", output: outputs.task, agent },
-              "Right prompt"
-            )
-          )
-        )
-      )
-    );
-    const ctx = new SmithersCtx({
-      runId: "frame-plan-test",
-      iteration: 0,
-      input: {},
-      outputs: {},
-      zodToKeyName: workflow.zodToKeyName,
-    });
-    const frame = await Effect.runPromise(renderFrame(workflow, ctx));
-
-    recorder.writePlan({
-      path: "workflow",
-      reason: "native graph",
-      workflow: {
-        name: "legacy-should-not-drive-graph",
-        description:
-          "This fallback shape should not be used once a frame exists.",
-        root: { type: "task", name: "Legacy Only", prompt: "legacy prompt" },
-      },
-    });
-    recorder.writeSmithersGraphSnapshot(frame);
-
-    const planJson = JSON.parse(
-      readFileSync(join(runsDir, "frame-plan-test", "plan.json"), "utf8")
-    );
-    expect(planJson.graph.source).toEqual({ kind: "smithers", frameNo: 0 });
-    expect(
-      planJson.graph.nodes.map((node: { id: string }) => node.id)
-    ).toContain("left");
-    expect(
-      planJson.graph.nodes.map((node: { id: string }) => node.id)
-    ).not.toContain("legacy-only");
-    expect(planJson.graph.edges).toContainEqual({
-      from: "plan",
-      to: "left",
-      label: "parallel",
     });
   });
 });

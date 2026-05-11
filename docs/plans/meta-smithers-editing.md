@@ -25,7 +25,7 @@ Local evidence checked for this plan:
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt:895-927`: workflow packs live under `.smithers/` with `workflows`, `prompts`, `components`, agents, config, and execution artifacts.
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt:6740-6787`, `:6927-6934`, `:7071-7096`: `workflow run`, `graph`, `workflow list`, `workflow path`, and `workflow create` are the native CLI surfaces this app should mirror or call.
 - `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/types.ts`: `GraphSnapshot` is `{ runId, frameNo, xml, tasks }`; `TaskDescriptor` carries `nodeId`, dependencies, agent, prompt, output schema/table, label, and `meta?: Record<string, unknown>`.
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/extract.js`: task `raw.meta` is preserved into `TaskDescriptor.meta`; this is the Smithers primitive that makes `meta.studio` viable.
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/extract.js`: task `raw.meta` is preserved into `TaskDescriptor.meta`; this is the Smithers primitive that makes `meta.editor` viable.
 - `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/cli/src/workflows.js`: workflow discovery is flat `.smithers/workflows/*.tsx`; workflow ids use lowercase kebab-case; source/display comments are already parsed by Smithers discovery.
 - `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/engine/src/engine.js`: `runWorkflow` persists input and run identity into Smithers state. The app should start runs through Smithers, not fabricate run rows or mutate completed run internals.
 - `docs/adr/0001-runs-in-smithers-canonical-location.md`: canonical run state is Smithers DB/log state, not CustomHarness `runs/` JSON.
@@ -33,26 +33,26 @@ Local evidence checked for this plan:
 
 ### Smithers primitive mapping
 
-| Product concept in this plan | Smithers primitive to use | What the app may add |
-| --- | --- | --- |
-| Workflow identity/listing | `.smithers/workflows/*.tsx`, `workflow list`, `workflow path`, Smithers workflow id validation | Selected workflow state in the viewer |
-| Workflow source editing | Ordinary `.smithers/workflows/*.tsx`, `.smithers/prompts/*`, `.smithers/components/*` | Metadata-backed form controls that patch source files |
-| Graph preview | `renderFrame` / `graph` producing `GraphSnapshot` | Visual layout/card rendering of that snapshot |
-| Node identity | `TaskDescriptor.nodeId` and Smithers task ids | Display selection state and inspector panels |
-| Prompt preview | Rendered task prompt from `TaskDescriptor.prompt` | Labels explaining that it is rendered, not the source template |
-| Editability | `TaskDescriptor.meta` populated from Smithers `Task` `meta` prop | A `meta.studio` convention for form shape and source destinations |
-| Preview input | `ctx.input` used during render and run | Local textarea and debounced preview render |
-| Downstream preview with fake outputs | `SmithersCtx` output snapshot supplied to render-only previews | Local-only pretend output editor clearly labelled preview-only |
-| Full execution | `workflow run` / `runWorkflow` using saved workflow source and input | Start button and result copy with Smithers run id |
-| Historical run state | Smithers DB/logs, `ps`, `inspect`, `chat`, `logs`, `fork`, `replay` | Read-only presentation or links/commands; no custom mutation |
-| Workflow copy | A new discoverable `.smithers/workflows/<id>.tsx` file using Smithers id rules | Save-as-copy UX and viewer switch |
+| Product concept in this plan         | Smithers primitive to use                                                                      | What the app may add                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Workflow identity/listing            | `.smithers/workflows/*.tsx`, `workflow list`, `workflow path`, Smithers workflow id validation | Selected workflow state in the viewer                             |
+| Workflow source editing              | Ordinary `.smithers/workflows/*.tsx`, `.smithers/prompts/*`, `.smithers/components/*`          | Metadata-backed form controls that patch source files             |
+| Graph preview                        | `renderFrame` / `graph` producing `GraphSnapshot`                                              | Visual layout/card rendering of that snapshot                     |
+| Node identity                        | `TaskDescriptor.nodeId` and Smithers task ids                                                  | Display selection state and inspector panels                      |
+| Prompt preview                       | Rendered task prompt from `TaskDescriptor.prompt`                                              | Labels explaining that it is rendered, not the source template    |
+| Editability                          | `TaskDescriptor.meta` populated from Smithers `Task` `meta` prop                               | A `meta.editor` convention for form shape and source destinations |
+| Preview input                        | `ctx.input` used during render and run                                                         | Local textarea and debounced preview render                       |
+| Downstream preview with fake outputs | `SmithersCtx` output snapshot supplied to render-only previews                                 | Local-only pretend output editor clearly labelled preview-only    |
+| Full execution                       | `workflow run` / `runWorkflow` using saved workflow source and input                           | Start button and result copy with Smithers run id                 |
+| Historical run state                 | Smithers DB/logs, `ps`, `inspect`, `chat`, `logs`, `fork`, `replay`                            | Read-only presentation or links/commands; no custom mutation      |
+| Workflow copy                        | A new discoverable `.smithers/workflows/<id>.tsx` file using Smithers id rules                 | Save-as-copy UX and viewer switch                                 |
 
 ### Anti-drift rules
 
 - Do not create a CustomHarness workflow IR. The graph shown in the UI is a rendering of Smithers `GraphSnapshot` plus layout data.
 - Do not store prompt/model/label edits in a CustomHarness run or browser-only override if the user expects future Smithers runs to use them. Save them into Smithers workflow-pack source.
 - Do not patch Smithers DB rows or output tables to make an old run look edited. Use Smithers-native fork/replay APIs later if run editing becomes a product requirement.
-- Do not infer source edit locations from arbitrary JSX. If `meta.studio` does not declare a safe source target, show read-only preview plus **Edit source (.tsx)**.
+- Do not infer source edit locations from arbitrary JSX. If `meta.editor` does not declare a safe source target, show read-only preview plus **Edit source (.tsx)**.
 - Do not make CustomHarness overlays required for Smithers to discover, render, or run a workflow.
 - Do not call bare `smithers`; Smithers docs say to use `bunx smithers-orchestrator` from the project root for CLI workflows.
 
@@ -90,7 +90,7 @@ The UI must label them as preview-only.
 
 ### 4. Metadata describes editability
 
-Rendered Smithers nodes may include `meta.studio` that tells the viewer what fields can be edited and where those edits should be saved.
+Rendered Smithers nodes may include `meta.editor` that tells the viewer what fields can be edited and where those edits should be saved.
 
 The UI should not guess source locations from arbitrary TypeScript when metadata is available.
 
@@ -183,7 +183,7 @@ When the user clicks a task node, the inspector should show:
    - model, if known
    - output table/schema name, if known
 2. Rendered prompt preview.
-3. Editable fields declared by `meta.studio`.
+3. Editable fields declared by `meta.editor`.
 4. Optional pretend output editor.
 5. Source/edit destination.
 
@@ -364,7 +364,7 @@ Suggested UX:
 
 This section is intentionally product-facing. Exact TypeScript shapes can change, but the underlying carrier should remain Smithers `Task` `meta`, which Smithers preserves into `TaskDescriptor.meta` during graph extraction.
 
-A Smithers task may declare Studio editing metadata:
+A Smithers task may declare Editor metadata:
 
 ```tsx
 <Task
@@ -373,26 +373,26 @@ A Smithers task may declare Studio editing metadata:
   agent={agents.claude}
   output={outputs.variant}
   meta={{
-    studio: {
+    editor: {
       editable: true,
       fields: {
         prompt: {
           label: "Prompt template",
           kind: "multiline-text",
-          sourcePath: ["tasks", "variant-claude", "prompt"]
+          sourcePath: ["tasks", "variant-claude", "prompt"],
         },
         model: {
           label: "Model",
           kind: "model-select",
-          sourcePath: ["agents", "claude", "model"]
+          sourcePath: ["agents", "claude", "model"],
         },
         label: {
           label: "Display label",
           kind: "text",
-          sourcePath: ["tasks", "variant-claude", "label"]
-        }
-      }
-    }
+          sourcePath: ["tasks", "variant-claude", "label"],
+        },
+      },
+    },
   }}
 >
   {editable.tasks["variant-claude"].prompt}
@@ -435,7 +435,11 @@ Request shape:
 {
   "mode": "current",
   "edits": [
-    { "nodeId": "variant-claude", "field": "prompt", "value": "New prompt template" }
+    {
+      "nodeId": "variant-claude",
+      "field": "prompt",
+      "value": "New prompt template"
+    }
   ]
 }
 ```
@@ -468,7 +472,7 @@ Server rules:
 
 - The server re-renders or reloads the workflow metadata before applying an edit. Client-provided field names are inputs, not authority.
 - The server uses Smithers workflow discovery rules for workflow ids and paths, matching `.smithers/workflows/*.tsx` and lowercase kebab-case ids.
-- The server rejects edits when the node is gone, the field is not declared in `meta.studio.fields`, the `sourcePath` is missing, or the source slot is not a supported scalar/string slot.
+- The server rejects edits when the node is gone, the field is not declared in `meta.editor.fields`, the `sourcePath` is missing, or the source slot is not a supported scalar/string slot.
 - The first version patches generated workflow config slots, not arbitrary JSX. If generated workflows need editing, they should expose stable config objects such as `editable.tasks[taskId].prompt`, `editable.tasks[taskId].label`, and `editable.agents[agentId].model`.
 - Saving returns a freshly rendered graph so the client does not need to infer whether the edit worked.
 - Whole-source editing through `/api/workflows/:id/source` can remain as the escape hatch, but structured controls should not use whole-file replacement.
@@ -637,9 +641,9 @@ Use strict red-green-refactor. One behavior at a time. Keep each slice shippable
 Behavior test:
 
 ```txt
-Given a fake Smithers graph task with meta.studio.editable = true
+Given a fake Smithers graph task with meta.editor.editable = true
 When GET /api/workflows/foo/graph is called
-Then the returned graph node includes the studio metadata needed by the inspector
+Then the returned graph node includes the editor metadata needed by the inspector
 ```
 
 Implementation notes:
@@ -651,14 +655,14 @@ Implementation notes:
 
 Test additions:
 
-- Add a mapper unit test in `tests/smithersGraph.test.ts` with `task('editable-task', { meta: { studio: { editable: true, fields: { prompt: { label: 'Prompt template', kind: 'multiline-text', sourcePath: ['tasks', 'editable-task', 'prompt'] } } } } })`.
+- Add a mapper unit test in `tests/smithersGraph.test.ts` with `task('editable-task', { meta: { editor: { editable: true, fields: { prompt: { label: 'Prompt template', kind: 'multiline-text', sourcePath: ['tasks', 'editable-task', 'prompt'] } } } } })`.
 - Add or extend `tests/workflowViewer.graph.test.ts` so the fake renderer returns a task descriptor with the same metadata and `/api/workflows/foo/graph` includes it.
 - Add a control assertion for a sibling task with no metadata: `node.smithers.meta` is `undefined` or does not contain `studio`, and the node still appears.
 
 Assertions:
 
-- `node.smithers.meta.studio.editable` is present.
-- `node.smithers.meta.studio.fields.prompt.sourcePath` survives as an array, not a stringified value.
+- `node.smithers.meta.editor.editable` is present.
+- `node.smithers.meta.editor.fields.prompt.sourcePath` survives as an array, not a stringified value.
 - Existing graph nodes without metadata still render.
 - Metadata preservation does not change graph layout, title, prompt, or edges.
 
@@ -673,14 +677,14 @@ bun test tests/smithersGraph.test.ts tests/workflowViewer.graph.test.ts
 Behavior test:
 
 ```txt
-Given a project workflow graph node without studio metadata
+Given a project workflow graph node without editor metadata
 When the user selects the node
 Then the inspector shows rendered prompt preview and an Edit Source fallback, but no structured save controls
 ```
 
 Implementation notes:
 
-- Replace the current project-mode rule that treats every task as editable. A task is structured-editable only when `node.smithers.meta.studio.editable === true` and it has at least one supported field.
+- Replace the current project-mode rule that treats every task as editable. A task is structured-editable only when `node.smithers.meta.editor.editable === true` and it has at least one supported field.
 - Non-editable project nodes may still show the pretend output editor because pretend output is preview-only; they must not show prompt/model/label save controls.
 - Extract a helper from the inline UI script if needed, for example `studioFieldsForNode(node)` and `inspectorModeForNode(node, currentWorkflowId)`, so the behavior can be unit-tested without browser automation.
 
@@ -711,14 +715,14 @@ If no UI helper file exists yet, create the smallest one needed rather than test
 Behavior test:
 
 ```txt
-Given a graph node with meta.studio.fields.prompt
+Given a graph node with meta.editor.fields.prompt
 When the user selects the node
 Then the inspector shows a Prompt template textarea populated from the metadata/source value
 ```
 
 Implementation notes:
 
-- Use `meta.studio.fields.prompt.kind === 'multiline-text'` to pick a textarea.
+- Use `meta.editor.fields.prompt.kind === 'multiline-text'` to pick a textarea.
 - The editable template and rendered prompt are different concepts. Show both when both values are available:
   - **Rendered prompt preview**: `node.prompt`, computed by Smithers for the current preview input.
   - **Prompt template**: the source-backed value from the metadata field.
@@ -764,11 +768,11 @@ Implementation notes:
 ```tsx
 const editable = {
   tasks: {
-    'variant-claude': {
-      label: 'Variant Claude',
-      prompt: 'Original prompt template'
-    }
-  }
+    "variant-claude": {
+      label: "Variant Claude",
+      prompt: "Original prompt template",
+    },
+  },
 } as const;
 ```
 
@@ -811,7 +815,7 @@ Then the workflow source updates and future runs use the new model value
 
 Implementation notes:
 
-- The current model may be on the task agent descriptor, on `meta.studio.fields.model.value`, or in the generated source config. Prefer the metadata/source value when present.
+- The current model may be on the task agent descriptor, on `meta.editor.fields.model.value`, or in the generated source config. Prefer the metadata/source value when present.
 - First-version validation can be conservative:
   - non-empty string,
   - no control characters,
@@ -1049,7 +1053,7 @@ bun test tests/workflowViewer.source.test.ts tests/workflowViewer.discovery.test
 Behavior test:
 
 ```txt
-Given a workflow group with meta.studio editable structure metadata
+Given a workflow group with meta.editor editable structure metadata
 When the group is selected
 Then the UI offers sequence/parallel controls
 ```
@@ -1095,7 +1099,7 @@ Use this as the final review for the first milestone before handing it to users.
 
 ### Metadata and inspector
 
-- Editable fields appear only from `meta.studio.fields`.
+- Editable fields appear only from `meta.editor.fields`.
 - Unannotated nodes are read-only except for the source fallback and preview-only pretend output.
 - Inspector labels distinguish **Rendered prompt preview**, **Prompt template**, **Pretend output**, and **Run output**.
 - The inspector shows task id, display label, agent id/kind, model when known, output table/schema when known, and source destination.
@@ -1181,7 +1185,7 @@ without touching existing run state.
 - Should prompt edits save directly into `.tsx`, or into `.smithers/prompts/*.mdx` referenced by the workflow?
 - Should save-in-place or save-as-copy be the default for generated workflows?
 - What model list should the UI offer for Claude, Codex/OpenAI, Gemini, and Pi agents?
-- Should `meta.studio` be treated as a CustomHarness/Poolside convention, or proposed upstream as a Smithers first-class convention?
+- Resolved: `meta.editor` is a CustomHarness-owned editor/source-mapping convention carried through Smithers `Task.meta`, not a Smithers core feature.
 - How should structure edits be represented so sequence/parallel changes are safe and understandable?
 - How should the UI surface Smithers-native fork/replay later without confusing it with source editing?
 - What exact TypeScript API should `SmithersRunReader` expose for DB-backed runs, node states, attempts, events, frames, and output rows?
