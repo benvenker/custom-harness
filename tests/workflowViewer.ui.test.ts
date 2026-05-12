@@ -588,12 +588,22 @@ describe("workflow viewer editor inspector state", () => {
       html.match(
         /async function createWorkflowFromPrompt\(event\) \{(?<body>[\s\S]*?)\n  function renderSourceEditor/
       )?.groups?.body ?? "";
-    expect(createWorkflowFromPrompt).toContain("startCreateWorkflowProgress();");
-    expect(createWorkflowFromPrompt).toContain("renderCreateWorkflowProgress(\"running\", createWorkflowProgressIndex, \"Rendering graph preview…\");");
-    expect(createWorkflowFromPrompt).toContain("renderCreateWorkflowProgress(\"running\", createWorkflowProgressIndex, \"Opening source editor…\");");
+    expect(createWorkflowFromPrompt).toContain(
+      "startCreateWorkflowProgress();"
+    );
+    expect(createWorkflowFromPrompt).toContain(
+      'renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Rendering graph preview…");'
+    );
+    expect(createWorkflowFromPrompt).toContain(
+      'renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Opening source editor…");'
+    );
     expect(createWorkflowFromPrompt).toContain("finishCreateWorkflowProgress(");
-    expect(createWorkflowFromPrompt).toContain("failCreateWorkflowProgress(\"Workflow creation failed.\");");
-    expect(createWorkflowFromPrompt).not.toContain("closeCreateWorkflowModal();\n      saveStoredProjectInput");
+    expect(createWorkflowFromPrompt).toContain(
+      'failCreateWorkflowProgress("Workflow creation failed.");'
+    );
+    expect(createWorkflowFromPrompt).not.toContain(
+      "closeCreateWorkflowModal();\n      saveStoredProjectInput"
+    );
   });
 
   it("renders Smithers control-flow badges on graph nodes and the selected-node inspector", () => {
@@ -602,6 +612,9 @@ describe("workflow viewer editor inspector state", () => {
     expect(html).toContain("function controlFlowBadges(node)");
     expect(html).toContain("function controlFlowBadgesHtml(node)");
     expect(html).toContain("function controlFlowInspectorHtml(node)");
+    expect(html).toContain("function controlFlowBadgeIcon(kind)");
+    expect(html).toContain('if (kind === "loop") return "↻";');
+    expect(html).toContain("border-color: var(--ok);");
     expect(html).toContain("${controlFlowBadgesHtml(n)}");
     expect(html).toContain("${controlFlowInspectorHtml(node)}");
     expect(html).toContain("Smithers graph metadata");
@@ -615,7 +628,9 @@ describe("workflow viewer editor inspector state", () => {
     expect(html).toContain("function markdownTableHtml(rows)");
     expect(html).toContain("<table><thead><tr>");
     expect(html).toContain("parseMarkdownTableRow(lines[startIndex])");
-    expect(html).toContain("function collectMarkdownCodeFence(lines, startIndex)");
+    expect(html).toContain(
+      "function collectMarkdownCodeFence(lines, startIndex)"
+    );
     expect(html).toContain("html.push(`<pre>${escapeHtml(block.code)}</pre>`)");
   });
 
@@ -623,19 +638,29 @@ describe("workflow viewer editor inspector state", () => {
     const html = readFileSync("web/index.html", "utf8");
     expect(html).toContain("function selectedWorkflowStorageKey(projectRoot)");
     expect(html).toContain("custom-harness:selected-workflow:${projectRoot}");
-    expect(html).toContain("function loadStoredSelectedWorkflow(projectRoot, workflows)");
+    expect(html).toContain(
+      "function loadStoredSelectedWorkflow(projectRoot, workflows)"
+    );
     expect(html).toContain("availableIds.has(stored)");
-    expect(html).toContain("function saveStoredSelectedWorkflow(projectRoot, workflowId)");
+    expect(html).toContain(
+      "function saveStoredSelectedWorkflow(projectRoot, workflowId)"
+    );
 
     const loadProjectWorkflowMode =
       html.match(
         /async function loadProjectWorkflowMode\(preferredWorkflowId = null\) \{(?<body>[\s\S]*?)\n  function selectedWorkflowStorageKey/
       )?.groups?.body ?? "";
-    const storedIndex = loadProjectWorkflowMode.indexOf("const storedWorkflowId");
-    const defaultIndex = loadProjectWorkflowMode.indexOf("project.defaultWorkflowId");
+    const storedIndex = loadProjectWorkflowMode.indexOf(
+      "const storedWorkflowId"
+    );
+    const defaultIndex = loadProjectWorkflowMode.indexOf(
+      "project.defaultWorkflowId"
+    );
     expect(storedIndex).toBeGreaterThan(-1);
     expect(defaultIndex).toBeGreaterThan(storedIndex);
-    expect(loadProjectWorkflowMode).toContain("saveStoredSelectedWorkflow(project.projectRoot, selected);");
+    expect(loadProjectWorkflowMode).toContain(
+      "saveStoredSelectedWorkflow(project.projectRoot, selected);"
+    );
   });
 
   it("does not make a project workflow task editable unless editor metadata explicitly enables a supported field", async () => {

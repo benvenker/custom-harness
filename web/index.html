@@ -706,9 +706,14 @@
     text-transform: uppercase;
   }
   .control-flow-badge.loop {
-    border-color: var(--harness);
-    color: var(--harness);
-    background: rgba(216,84,61,0.06);
+    border-color: var(--ok);
+    color: var(--ok);
+    background: rgba(44,122,63,0.07);
+  }
+  .control-flow-icon {
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0;
   }
   .control-flow-badge.branch {
     border-color: var(--warn);
@@ -1945,7 +1950,7 @@
   function controlFlowBadgesHtml(node) {
     const badges = controlFlowBadges(node);
     if (badges.length === 0) return "";
-    return `<div class="control-flow-badges">${badges.map(badge => `<span class="control-flow-badge ${escapeHtml(badge.kind || "")}" title="${escapeHtml(badge.detail || badge.label || badge.kind)}">${escapeHtml(badge.label || badge.kind)}</span>`).join("")}</div>`;
+    return `<div class="control-flow-badges">${badges.map(controlFlowBadgeHtml).join("")}</div>`;
   }
 
   function controlFlowInspectorHtml(node) {
@@ -1953,9 +1958,24 @@
     if (badges.length === 0) return "";
     return `<div class="field">
       <div class="lbl"><span>Control flow</span><span class="output-meta">Smithers graph metadata</span></div>
-      <div class="control-flow-badges">${badges.map(badge => `<span class="control-flow-badge ${escapeHtml(badge.kind || "")}" title="${escapeHtml(badge.detail || badge.label || badge.kind)}">${escapeHtml(badge.label || badge.kind)}</span>`).join("")}</div>
+      <div class="control-flow-badges">${badges.map(controlFlowBadgeHtml).join("")}</div>
       <div class="node-edit-note">Derived from Smithers workflow structure. ${escapeHtml(badges.map(badge => badge.detail).filter(Boolean).join(" · "))}</div>
     </div>`;
+  }
+
+  function controlFlowBadgeHtml(badge) {
+    const kind = badge?.kind || "";
+    const label = badge?.label || kind;
+    const title = badge?.detail || label || kind;
+    const icon = controlFlowBadgeIcon(kind);
+    return `<span class="control-flow-badge ${escapeHtml(kind)}" title="${escapeHtml(title)}"><span class="control-flow-icon" aria-hidden="true">${escapeHtml(icon)}</span><span>${escapeHtml(label)}</span></span>`;
+  }
+
+  function controlFlowBadgeIcon(kind) {
+    if (kind === "loop") return "↻";
+    if (kind === "parallel") return "⇄";
+    if (kind === "branch") return "◇";
+    return "•";
   }
 
   function outputRowForNode(node) {
