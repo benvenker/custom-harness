@@ -3,23 +3,24 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
 import type { GraphSnapshot } from "@smithers-orchestrator/graph";
 import {
-  runOutcome,
-  type RunOutcomeOptions,
-  type RunOutcomeResult,
-} from "./app/runOutcome.js";
-import {
-  runSmithersWorkflow,
-  type RunSmithersWorkflowOptions,
-  type RunSmithersWorkflowResult,
-} from "./app/runSmithersWorkflow.js";
+  RESOURCE_MIME_TYPE,
+  registerAppResource,
+  registerAppTool,
+} from "@modelcontextprotocol/ext-apps/server";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type {
+  CallToolResult,
+  ReadResourceResult,
+} from "@modelcontextprotocol/sdk/types.js";
+import * as z from "zod/v4";
 import { loadSmithersRuntime, loadWorkflow } from "./app/smithersRuntime.js";
-import { depsFromEnv } from "./cli.js";
-import { planSchema, type PlannerOutput } from "./planning/schema.js";
 import { smithersSnapshotToRenderGraph } from "./runs/smithersGraph.js";
 import { buildSmithersWorkflowRunCommand } from "./smithersProject/cli.js";
 import { addHistoricalRunView } from "./smithersProject/historicalGraph.js";
@@ -31,10 +32,6 @@ import type {
   SmithersRunReader,
 } from "./smithersProject/runReaderTypes.js";
 
-type RunOutcomeFn = (options: RunOutcomeOptions) => Promise<RunOutcomeResult>;
-type RunSmithersWorkflowFn = (
-  options: RunSmithersWorkflowOptions
-) => Promise<RunSmithersWorkflowResult>;
 type RenderProjectWorkflowGraphFn = (options: {
   projectRoot: string;
   workflowId: string;
@@ -49,57 +46,38 @@ type RunProjectWorkflowFn = (options: {
   input: Record<string, unknown>;
 }) => Promise<{ runId: string; status: string }>;
 
+type AuthorWorkflowSourceFn = (options: {
+  prompt: string;
+  workflowId: string;
+  displayName: string;
+  model?: string;
+  previousSource?: string;
+  repairError?: string;
+}) => Promise<{ source: string; model: string }>;
+
 type CreateSmithersRunReaderFn = (options: {
   projectRoot: string;
 }) => SmithersRunReader | Promise<SmithersRunReader>;
 
 export type HarnessServerOptions = {
   rootDir?: string;
-  runsDir?: string;
   projectRoot?: string;
   workflowId?: string;
-  runOutcome?: RunOutcomeFn;
-  runSmithersWorkflow?: RunSmithersWorkflowFn;
   renderProjectWorkflowGraph?: RenderProjectWorkflowGraphFn;
   runProjectWorkflow?: RunProjectWorkflowFn;
+  authorWorkflowSource?: AuthorWorkflowSourceFn;
   createSmithersRunReader?: CreateSmithersRunReaderFn;
-};
-
-type RunJson = {
-  id: string;
-  goal: string;
-};
-
-type PlanJson = {
-  raw: unknown;
-};
-
-type SmithersGraphExportPlan = {
-  path?: unknown;
-  reason?: unknown;
-  source: {
-    kind: "smithers";
-    workflowPath: string;
-    input: Record<string, unknown>;
-    context?: string;
-    promptOverrides?: Record<string, string>;
-  };
 };
 
 export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
   const rootDir = resolve(options.rootDir ?? process.cwd());
-  const runsDir =
-    options.runsDir ?? process.env.CUSTOM_HARNESS_RUNS_DIR ?? "runs";
-  const projectRoot = options.projectRoot
-    ? resolve(options.projectRoot)
-    : undefined;
+  const projectRoot = resolveProjectRootOption(rootDir, options.projectRoot);
   const defaultWorkflowId = options.workflowId;
-  const runOutcomeFn = options.runOutcome ?? runOutcome;
-  const runSmithersWorkflowFn =
-    options.runSmithersWorkflow ?? runSmithersWorkflow;
   const renderProjectWorkflowGraphFn =
     options.renderProjectWorkflowGraph ?? renderProjectWorkflowGraph;
   const runProjectWorkflowFn = options.runProjectWorkflow ?? runProjectWorkflow;
+  const authorWorkflowSourceFn =
+    options.authorWorkflowSource ?? authorWorkflowSource;
   const createSmithersRunReaderFn =
     options.createSmithersRunReader ?? defaultCreateSmithersRunReader;
 
@@ -107,29 +85,31 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
     try {
       const url = new URL(request.url);
 
-      if (request.method === "OPTIONS") return json({ ok: true });
+      if (request.method === "OPTIONS") return withCors(json({ ok: true }));
 
-      const rerunMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/rerun$/);
-      if (request.method === "POST" && rerunMatch) {
-        return await rerunRun({
-          runId: decodeURIComponent(rerunMatch[1]),
+      if (url.pathname === "/mcp") {
+        return await mcpResponse({
           request,
-          runsDir,
-          runOutcome: runOutcomeFn,
-          runSmithersWorkflow: runSmithersWorkflowFn,
+          projectRoot,
+          defaultWorkflowId,
+          renderProjectWorkflowGraph: renderProjectWorkflowGraphFn,
+          runProjectWorkflow: runProjectWorkflowFn,
+          authorWorkflowSource: authorWorkflowSourceFn,
+          createSmithersRunReader: createSmithersRunReaderFn,
         });
       }
 
-      if (request.method === "POST" && url.pathname === "/api/smithers-runs") {
-        return await startSmithersRun({
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/workflows/create-from-prompt"
+      ) {
+        return await workflowCreateFromPromptResponse({
           request,
-          runsDir,
-          runSmithersWorkflow: runSmithersWorkflowFn,
+          projectRoot,
+          defaultWorkflowId,
+          renderProjectWorkflowGraph: renderProjectWorkflowGraphFn,
+          authorWorkflowSource: authorWorkflowSourceFn,
         });
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/runs") {
-        return await startRun({ request, runsDir, runOutcome: runOutcomeFn });
       }
 
       const workflowRunCancelMatch = url.pathname.match(
@@ -268,247 +248,974 @@ export function createHarnessServerHandler(options: HarnessServerOptions = {}) {
   };
 }
 
-async function startSmithersRun(args: {
+async function mcpResponse(args: {
   request: Request;
-  runsDir: string;
-  runSmithersWorkflow: RunSmithersWorkflowFn;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+  runProjectWorkflow: RunProjectWorkflowFn;
+  authorWorkflowSource: AuthorWorkflowSourceFn;
+  createSmithersRunReader: CreateSmithersRunReaderFn;
 }) {
-  const body = await readJsonBody(args.request);
-  if (
-    typeof body.workflowPath !== "string" ||
-    body.workflowPath.trim() === ""
-  ) {
-    return json({ ok: false, error: "Missing workflowPath" }, 400);
-  }
-  if (!isRecord(body.input)) {
-    return json({ ok: false, error: "Missing input" }, 400);
-  }
-
-  const runId =
-    typeof body.runId === "string" ? body.runId : crypto.randomUUID();
-  const promptOverrides = parsePromptOverrides(body.promptOverrides);
-  launchSmithersRun(args.runSmithersWorkflow, {
-    workflowPath: body.workflowPath,
-    input: body.input,
-    goal:
-      typeof body.goal === "string" && body.goal.trim() ? body.goal : undefined,
-    context: typeof body.context === "string" ? body.context : undefined,
-    ...(promptOverrides === undefined ? {} : { promptOverrides }),
-    runId,
-    runsDir: args.runsDir,
+  await logMcpRequest(args.request);
+  const server = createCustomHarnessMcpServer({
+    projectRoot: args.projectRoot,
+    defaultWorkflowId: args.defaultWorkflowId,
+    renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+    runProjectWorkflow: args.runProjectWorkflow,
+    authorWorkflowSource: args.authorWorkflowSource,
+    createSmithersRunReader: args.createSmithersRunReader,
   });
-  return json(
-    {
-      ok: true,
-      runId,
-      status: "running",
-      path: "workflow",
-    },
-    202
-  );
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  await server.connect(transport);
+  try {
+    const response = await transport.handleRequest(args.request);
+    return withCors(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return withCors(
+      json(
+        {
+          jsonrpc: "2.0",
+          error: { code: -32603, message },
+          id: null,
+        },
+        500
+      )
+    );
+  }
 }
 
-async function rerunRun(args: {
-  runId: string;
-  request: Request;
-  runsDir: string;
-  runOutcome: RunOutcomeFn;
-  runSmithersWorkflow: RunSmithersWorkflowFn;
+async function logMcpRequest(request: Request) {
+  if (request.method !== "POST") {
+    console.log("[mcp-request]", request.method, new URL(request.url).pathname);
+    return;
+  }
+  try {
+    const body = await request.clone().json();
+    const method = isRecord(body) ? body.method : undefined;
+    const params =
+      isRecord(body) && isRecord(body.params) ? body.params : undefined;
+    const name =
+      params && typeof params.name === "string" ? params.name : undefined;
+    const uri =
+      params && typeof params.uri === "string" ? params.uri : undefined;
+    console.log(
+      "[mcp-request]",
+      request.method,
+      method ?? "unknown",
+      name ? { name } : uri ? { uri } : ""
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log("[mcp-request]", request.method, "unparseable", message);
+  }
+}
+
+function createCustomHarnessMcpServer(args: {
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+  runProjectWorkflow: RunProjectWorkflowFn;
+  authorWorkflowSource: AuthorWorkflowSourceFn;
+  createSmithersRunReader: CreateSmithersRunReaderFn;
 }) {
-  const body = await readJsonBody(args.request);
-  const existing = readExistingRun(args.runsDir, args.runId);
-  const runId =
-    typeof body.runId === "string" ? body.runId : crypto.randomUUID();
-  const promptOverrides = parsePromptOverrides(body.promptOverrides);
-  if (isSmithersGraphExportPlan(existing.rawPlan)) {
-    const context =
-      typeof body.context === "string"
-        ? body.context
-        : existing.rawPlan.source.context;
-    const inheritedOverrides = existing.rawPlan.source.promptOverrides;
-    const mergedOverrides = mergeOverrides(inheritedOverrides, promptOverrides);
-    launchSmithersRun(args.runSmithersWorkflow, {
-      workflowPath: existing.rawPlan.source.workflowPath,
-      input: existing.rawPlan.source.input,
-      goal: existing.run.goal,
-      ...(context === undefined ? {} : { context }),
-      ...(mergedOverrides === undefined
-        ? {}
-        : { promptOverrides: mergedOverrides }),
-      forkedFrom: args.runId,
-      runId,
-      runsDir: args.runsDir,
-    });
-    return json(
-      {
-        ok: true,
-        runId,
-        status: "running",
-        path: "workflow",
-        forkedFrom: args.runId,
+  const server = new McpServer({
+    name: "custom-harness-smithers-workbench",
+    version: "0.1.0",
+  });
+  const resourceUri = MCP_WORKBENCH_RESOURCE_URI;
+
+  registerAppTool(
+    server,
+    "open_workflow_workbench",
+    {
+      title: "Open Smithers Workflow Workbench",
+      description:
+        "Open an interactive MCP App that renders a CustomHarness/Smithers workflow graph.",
+      inputSchema: {
+        workflowId: z.string().optional(),
+        input: z.record(z.string(), z.unknown()).optional(),
       },
-      202
-    );
-  }
-
-  if (promptOverrides !== undefined) {
-    return json(
-      {
-        ok: false,
-        error: "promptOverrides are only supported for Smithers workflow runs",
-      },
-      400
-    );
-  }
-  const plan = planSchema.parse(existing.rawPlan);
-  launchRun(args.runOutcome, {
-    goal: existing.run.goal,
-    context: typeof body.context === "string" ? body.context : undefined,
-    planner: () => plan,
-    executorAgent: depsFromEnv().executorAgent,
-    runId,
-    runsDir: args.runsDir,
-  });
-  return json(
-    {
-      ok: true,
-      runId,
-      status: "running",
-      path: plan.path,
+      _meta: { ui: { resourceUri } },
     },
-    202
-  );
-}
-
-function parsePromptOverrides(
-  value: unknown
-): Record<string, string> | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (!isRecord(value))
-    throw new RequestValidationError(
-      "promptOverrides must be a JSON object of string-to-string values"
-    );
-  const out: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw !== "string")
-      throw new RequestValidationError(
-        `promptOverrides[${key}] must be a string`
-      );
-    if (!key.trim()) continue;
-    if (raw.trim()) out[key] = raw;
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
-function mergeOverrides(
-  inherited: Record<string, string> | undefined,
-  next: Record<string, string> | undefined
-) {
-  if (!inherited && !next) return undefined;
-  const merged = { ...(inherited ?? {}), ...(next ?? {}) };
-  return Object.keys(merged).length > 0 ? merged : undefined;
-}
-
-async function startRun(args: {
-  request: Request;
-  runsDir: string;
-  runOutcome: RunOutcomeFn;
-}) {
-  const body = await readJsonBody(args.request);
-  if (typeof body.goal !== "string" || body.goal.trim() === "") {
-    return json({ ok: false, error: "Missing goal" }, 400);
-  }
-
-  const envDeps = depsFromEnv();
-  const plan = body.plan === undefined ? null : planSchema.parse(body.plan);
-  const runId =
-    typeof body.runId === "string"
-      ? body.runId
-      : (envDeps.runId ?? crypto.randomUUID());
-  launchRun(args.runOutcome, {
-    goal: body.goal,
-    context: typeof body.context === "string" ? body.context : undefined,
-    planner: plan ? () => plan : envDeps.planner,
-    executorAgent: envDeps.executorAgent,
-    runId,
-    runsDir: args.runsDir,
-  });
-  return json(
-    {
-      ok: true,
-      runId,
-      status: "running",
-      path: plan?.path,
-    },
-    202
-  );
-}
-
-function launchRun(runOutcomeFn: RunOutcomeFn, options: RunOutcomeOptions) {
-  void runOutcomeFn(options).catch((error) => {
-    const message =
-      error instanceof Error ? (error.stack ?? error.message) : String(error);
-    console.error(
-      `background run failed before recorder could finish: ${message}`
-    );
-  });
-}
-
-function launchSmithersRun(
-  runSmithersWorkflowFn: RunSmithersWorkflowFn,
-  options: RunSmithersWorkflowOptions
-) {
-  void runSmithersWorkflowFn(options).catch((error) => {
-    const message =
-      error instanceof Error ? (error.stack ?? error.message) : String(error);
-    console.error(
-      `background Smithers workflow rerun failed before recorder could finish: ${message}`
-    );
-  });
-}
-
-function readExistingRun(
-  runsDir: string,
-  runId: string
-): { run: RunJson; rawPlan: unknown } {
-  const safeRunId = safeSegment(runId);
-  const runDir = join(runsDir, safeRunId);
-  const runPath = join(runDir, "run.json");
-  const planPath = join(runDir, "plan.json");
-  if (!existsSync(runPath)) throw new Error(`Run not found: ${runId}`);
-  if (!existsSync(planPath)) throw new Error(`Run has no plan.json: ${runId}`);
-
-  const run = JSON.parse(readFileSync(runPath, "utf8")) as RunJson;
-  const planJson = JSON.parse(readFileSync(planPath, "utf8")) as PlanJson;
-  if (typeof run.goal !== "string" || run.goal.trim() === "")
-    throw new Error(`Run has no goal: ${runId}`);
-  return { run, rawPlan: planJson.raw };
-}
-
-function isSmithersGraphExportPlan(
-  value: unknown
-): value is SmithersGraphExportPlan {
-  if (!value || typeof value !== "object") return false;
-  const source = (value as { source?: unknown }).source;
-  if (!source || typeof source !== "object") return false;
-  const maybeSource = source as Record<string, unknown>;
-  if (
-    maybeSource.kind !== "smithers" ||
-    typeof maybeSource.workflowPath !== "string" ||
-    !isRecord(maybeSource.input) ||
-    (maybeSource.context !== undefined &&
-      typeof maybeSource.context !== "string")
-  ) {
-    return false;
-  }
-  const overrides = maybeSource.promptOverrides;
-  if (overrides !== undefined) {
-    if (!isRecord(overrides)) return false;
-    for (const v of Object.values(overrides)) {
-      if (typeof v !== "string") return false;
+    async ({ workflowId, input }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] open_workflow_workbench", { workflowId });
+      const bootstrap = await mcpWorkbenchBootstrap({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        workflowId,
+        input,
+        renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: bootstrap.ok
+              ? `Opened Smithers workflow workbench for ${bootstrap.workflow?.id ?? "project"}.`
+              : `Unable to open Smithers workflow workbench: ${bootstrap.error?.message ?? "unknown error"}`,
+          },
+        ],
+        structuredContent: bootstrap,
+        isError: bootstrap.ok ? undefined : true,
+      };
     }
+  );
+
+  registerAppTool(
+    server,
+    "create_workflow_from_prompt",
+    {
+      title: "Create Smithers Workflow From Prompt",
+      description:
+        "Generate ordinary Smithers TSX Workflow Source from a natural-language workflow description, save it under .smithers/workflows, and render-verify it.",
+      inputSchema: {
+        prompt: z.string(),
+        workflowId: z.string().optional(),
+        displayName: z.string().optional(),
+        model: z.string().optional(),
+        overwrite: z.boolean().optional(),
+      },
+      _meta: { ui: { resourceUri } },
+    },
+    async ({
+      prompt,
+      workflowId,
+      displayName,
+      model,
+      overwrite,
+    }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] create_workflow_from_prompt", { workflowId });
+      const data = await createWorkflowFromPrompt({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        prompt,
+        requestedWorkflowId: workflowId,
+        displayName,
+        model,
+        overwrite,
+        renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+        authorWorkflowSource: args.authorWorkflowSource,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: data.ok
+              ? `Created Smithers workflow ${data.workflowId} and ${data.verified ? "render-verified it" : "saved it, but render verification failed"}.`
+              : `Unable to create Smithers workflow: ${data.error}`,
+          },
+        ],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_create_from_prompt",
+    {
+      title: "Create Workflow From Prompt",
+      description:
+        "Generate a Smithers workflow from a prompt for the MCP App.",
+      inputSchema: {
+        prompt: z.string(),
+        workflowId: z.string().optional(),
+        displayName: z.string().optional(),
+        model: z.string().optional(),
+        overwrite: z.boolean().optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({
+      prompt,
+      workflowId,
+      displayName,
+      model,
+      overwrite,
+    }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_create_from_prompt", { workflowId });
+      const data = await createWorkflowFromPrompt({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        prompt,
+        requestedWorkflowId: workflowId,
+        displayName,
+        model,
+        overwrite,
+        renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+        authorWorkflowSource: args.authorWorkflowSource,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflows_list",
+    {
+      title: "List Workflows",
+      description: "List Smithers workflows for the MCP App.",
+      inputSchema: {},
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async (): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflows_list");
+      const data = workflowsResponse({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_graph_render",
+    {
+      title: "Render Workflow Graph",
+      description: "Render a Smithers workflow graph without executing tasks.",
+      inputSchema: {
+        workflowId: z.string(),
+        input: z.record(z.string(), z.unknown()).optional(),
+        outputs: z.record(z.string(), z.array(z.unknown())).optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId, input, outputs }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_graph_render", { workflowId });
+      const data = await mcpRenderWorkflowGraph({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        workflowId,
+        input,
+        outputs,
+        renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_project_get",
+    {
+      title: "Get Project",
+      description:
+        "Get the current CustomHarness Smithers project for the MCP App.",
+      inputSchema: {},
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async (): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_project_get");
+      const data = projectResponse({
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_source_get",
+    {
+      title: "Get Workflow Source",
+      description: "Read Smithers Workflow Source for the MCP App editor.",
+      inputSchema: { workflowId: z.string() },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_source_get", { workflowId });
+      const response = await workflowSourceResponse({
+        request: new Request(
+          `http://custom-harness.local/api/workflows/${encodeURIComponent(workflowId)}/source`
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        workflowId,
+        write: false,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_source_save",
+    {
+      title: "Save Workflow Source",
+      description:
+        "Save the complete Smithers Workflow Source for the MCP App editor.",
+      inputSchema: { workflowId: z.string(), source: z.string() },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId, source }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_source_save", { workflowId });
+      const response = await workflowSourceResponse({
+        request: new Request(
+          `http://custom-harness.local/api/workflows/${encodeURIComponent(workflowId)}/source`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ source }),
+          }
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        workflowId,
+        write: true,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_source_field_save",
+    {
+      title: "Save Workflow Source Field",
+      description:
+        "Save one editable string field in Smithers Workflow Source for the MCP App editor.",
+      inputSchema: {
+        workflowId: z.string(),
+        sourcePath: z.array(z.string()),
+        value: z.string(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId, sourcePath, value }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_source_field_save", {
+        workflowId,
+        sourcePath,
+      });
+      const response = await workflowSourceFieldResponse({
+        request: new Request(
+          `http://custom-harness.local/api/workflows/${encodeURIComponent(workflowId)}/source-field`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ sourcePath, value }),
+          }
+        ),
+        projectRoot: args.projectRoot,
+        workflowId,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_run_start",
+    {
+      title: "Start Workflow Run",
+      description: "Start a Smithers workflow run from the MCP App.",
+      inputSchema: {
+        workflowId: z.string(),
+        input: z.record(z.string(), z.unknown()).optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId, input }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_run_start", { workflowId });
+      const response = await workflowRunResponse({
+        request: new Request(
+          `http://custom-harness.local/api/workflows/${encodeURIComponent(workflowId)}/run`,
+          {
+            method: "POST",
+            body: JSON.stringify({ input: input ?? {} }),
+          }
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        workflowId,
+        runProjectWorkflow: args.runProjectWorkflow,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_workflow_run_cancel",
+    {
+      title: "Cancel Workflow Run",
+      description: "Cancel an active Smithers workflow run from the MCP App.",
+      inputSchema: { workflowId: z.string(), runId: z.string() },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ workflowId, runId }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_workflow_run_cancel", { workflowId, runId });
+      const response = await workflowRunCancelResponse({
+        projectRoot: args.projectRoot,
+        workflowId,
+        runId,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_smithers_runs_list",
+    {
+      title: "List Smithers Runs",
+      description: "List Smithers runs for the MCP App run inspector.",
+      inputSchema: {
+        limit: z.number().optional(),
+        status: z.string().optional(),
+        workflowId: z.string().optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ limit, status, workflowId }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_smithers_runs_list", { workflowId, status });
+      const params = new URLSearchParams();
+      if (typeof limit === "number") params.set("limit", String(limit));
+      if (typeof status === "string") params.set("status", status);
+      if (typeof workflowId === "string") params.set("workflowId", workflowId);
+      const response = await smithersRunsListResponse({
+        request: new Request(
+          `http://custom-harness.local/api/smithers/runs?${params}`
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        createSmithersRunReader: args.createSmithersRunReader,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_smithers_run_detail_get",
+    {
+      title: "Get Smithers Run Detail",
+      description: "Get Smithers run detail for the MCP App run inspector.",
+      inputSchema: {
+        runId: z.string(),
+        eventsAfterSeq: z.number().optional(),
+        eventLimit: z.number().optional(),
+        frameLimit: z.number().optional(),
+        includeOutputs: z.boolean().optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({
+      runId,
+      eventsAfterSeq,
+      eventLimit,
+      frameLimit,
+      includeOutputs,
+    }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_smithers_run_detail_get", { runId });
+      const params = new URLSearchParams();
+      if (typeof eventsAfterSeq === "number")
+        params.set("eventsAfterSeq", String(eventsAfterSeq));
+      if (typeof eventLimit === "number")
+        params.set("eventLimit", String(eventLimit));
+      if (typeof frameLimit === "number")
+        params.set("frameLimit", String(frameLimit));
+      if (typeof includeOutputs === "boolean")
+        params.set("includeOutputs", String(includeOutputs));
+      const response = await smithersRunDetailResponse({
+        request: new Request(
+          `http://custom-harness.local/api/smithers/runs/${encodeURIComponent(runId)}?${params}`
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        runId,
+        createSmithersRunReader: args.createSmithersRunReader,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "ch_smithers_run_events_list",
+    {
+      title: "List Smithers Run Events",
+      description: "List Smithers run events for the MCP App run inspector.",
+      inputSchema: {
+        runId: z.string(),
+        afterSeq: z.number().optional(),
+        limit: z.number().optional(),
+        nodeId: z.string().optional(),
+        types: z.array(z.string()).optional(),
+        sinceTimestampMs: z.number().optional(),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({
+      runId,
+      afterSeq,
+      limit,
+      nodeId,
+      types,
+      sinceTimestampMs,
+    }): Promise<CallToolResult> => {
+      console.log("[mcp-tool] ch_smithers_run_events_list", { runId, nodeId });
+      const params = new URLSearchParams();
+      if (typeof afterSeq === "number")
+        params.set("afterSeq", String(afterSeq));
+      if (typeof limit === "number") params.set("limit", String(limit));
+      if (typeof nodeId === "string") params.set("nodeId", nodeId);
+      if (Array.isArray(types)) params.set("types", types.join(","));
+      if (typeof sinceTimestampMs === "number")
+        params.set("sinceTimestampMs", String(sinceTimestampMs));
+      const response = await smithersRunEventsResponse({
+        request: new Request(
+          `http://custom-harness.local/api/smithers/runs/${encodeURIComponent(runId)}/events?${params}`
+        ),
+        projectRoot: args.projectRoot,
+        defaultWorkflowId: args.defaultWorkflowId,
+        runId,
+        createSmithersRunReader: args.createSmithersRunReader,
+      });
+      const data = await response.json();
+      return {
+        content: [{ type: "text", text: JSON.stringify(data) }],
+        structuredContent: data,
+        isError: data.ok ? undefined : true,
+      };
+    }
+  );
+
+  registerAppResource(
+    server,
+    resourceUri,
+    resourceUri,
+    {
+      mimeType: RESOURCE_MIME_TYPE,
+      description: "CustomHarness Smithers workflow workbench MCP App",
+      _meta: {
+        ui: {
+          csp: {
+            connectDomains: [],
+            resourceDomains: [],
+            frameDomains: [],
+            baseUriDomains: [],
+          },
+        },
+      },
+    },
+    async (): Promise<ReadResourceResult> => {
+      console.log("[mcp-resource] read", resourceUri);
+      return {
+        contents: [
+          {
+            uri: resourceUri,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: await mcpWorkbenchHtml(),
+            _meta: {
+              ui: {
+                csp: {
+                  connectDomains: [],
+                  resourceDomains: [],
+                  frameDomains: [],
+                  baseUriDomains: [],
+                },
+              },
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  return server;
+}
+
+const MCP_WORKBENCH_RESOURCE_URI = "ui://custom-harness/workbench.html";
+const MCP_GRAPH_HYDRATION_MAX_BYTES = 250 * 1024;
+
+type NormalizedToolError = {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  actionLabel?: string;
+  details?: Record<string, unknown>;
+};
+
+async function mcpWorkbenchBootstrap(args: {
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  workflowId?: string;
+  input?: Record<string, unknown>;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+}): Promise<
+  Record<string, unknown> & {
+    ok: boolean;
+    workflow?: { id?: string; title?: string; path?: string };
+    error?: NormalizedToolError;
   }
-  return true;
+> {
+  const project = projectResponse(args);
+  if (!project.ok) {
+    return mcpWorkbenchError(
+      "PROJECT_SETUP_REQUIRED",
+      "error" in project ? project.error : "Project setup failed",
+      { project }
+    );
+  }
+  const workflows = workflowsResponse(args);
+  if (!workflows.ok) {
+    return mcpWorkbenchError(
+      "WORKFLOWS_UNAVAILABLE",
+      "error" in workflows ? workflows.error : "Workflows unavailable",
+      { workflows }
+    );
+  }
+  const selectedWorkflowId =
+    args.workflowId ?? args.defaultWorkflowId ?? workflows.workflows[0]?.id;
+  const selectedWorkflow = workflows.workflows.find(
+    (workflow) => workflow.id === selectedWorkflowId
+  );
+  const base = {
+    contractVersion: 1,
+    project: {
+      projectRoot: project.projectRoot,
+      label:
+        project.projectRoot?.split(sep).filter(Boolean).at(-1) ?? "Project",
+      defaultWorkflowId: args.defaultWorkflowId,
+    },
+    workflows: workflows.workflows,
+    selectedWorkflowId,
+    capabilities: mcpWorkbenchCapabilities(),
+  };
+  if (!selectedWorkflowId || !selectedWorkflow) {
+    return {
+      ok: true,
+      ...base,
+      launch: {
+        title: "Smithers workflow workbench",
+        subtitle: "No Smithers workflows found yet.",
+        status: "empty",
+        viewId: mcpWorkbenchViewId(args.projectRoot, undefined),
+        resourceUri: MCP_WORKBENCH_RESOURCE_URI,
+      },
+      workflow: selectedWorkflowId ? { id: selectedWorkflowId } : undefined,
+      graphSummary: { nodeCount: 0, edgeCount: 0, hasErrors: false },
+      graph: null,
+      graphHydration: {
+        included: false,
+        truncated: false,
+        reason: "empty",
+        nodeCount: 0,
+        edgeCount: 0,
+      },
+    };
+  }
+  const rendered = await mcpRenderWorkflowGraph({
+    projectRoot: args.projectRoot,
+    defaultWorkflowId: args.defaultWorkflowId,
+    workflowId: selectedWorkflowId,
+    input: args.input,
+    renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+  });
+  if (!rendered.ok) {
+    const error = normalizeToolError(
+      "RENDER_FAILED",
+      rendered.error ?? "Workflow graph render failed",
+      { workflowId: selectedWorkflowId }
+    );
+    return {
+      ok: false,
+      ...base,
+      launch: {
+        title: "Smithers workflow workbench",
+        subtitle: selectedWorkflowId,
+        status: "error",
+        viewId: mcpWorkbenchViewId(args.projectRoot, selectedWorkflowId),
+        resourceUri: MCP_WORKBENCH_RESOURCE_URI,
+      },
+      workflow: {
+        id: selectedWorkflow.id,
+        title: selectedWorkflow.id,
+        path: selectedWorkflow.path,
+      },
+      graphSummary: { nodeCount: 0, edgeCount: 0, hasErrors: true },
+      graph: null,
+      graphHydration: {
+        included: false,
+        truncated: false,
+        reason: "error",
+        nodeCount: 0,
+        edgeCount: 0,
+      },
+      error,
+    };
+  }
+  const graphSummary = summarizeRenderGraph(rendered.graph);
+  const graphBytes = byteLengthJson(rendered.graph);
+  const includeGraph = graphBytes <= MCP_GRAPH_HYDRATION_MAX_BYTES;
+  return {
+    ok: true,
+    ...base,
+    launch: {
+      title: "Smithers workflow workbench",
+      subtitle: `${selectedWorkflowId} · ${graphSummary.nodeCount} nodes`,
+      status: graphSummary.hasErrors ? "verification_failed" : "ready",
+      viewId: mcpWorkbenchViewId(args.projectRoot, selectedWorkflowId),
+      resourceUri: MCP_WORKBENCH_RESOURCE_URI,
+    },
+    workflow: {
+      id: selectedWorkflow.id,
+      title: rendered.graph?.title ?? selectedWorkflow.id,
+      path: selectedWorkflow.path,
+    },
+    graphSummary,
+    graph: includeGraph ? rendered.graph : null,
+    graphHydration: {
+      included: includeGraph,
+      truncated: !includeGraph,
+      reason: includeGraph ? "ok" : "too_large",
+      bytes: graphBytes,
+      nodeCount: graphSummary.nodeCount,
+      edgeCount: graphSummary.edgeCount,
+    },
+  };
+}
+
+function mcpWorkbenchError(
+  code: string,
+  message: string,
+  details?: Record<string, unknown>
+) {
+  return {
+    ok: false as const,
+    contractVersion: 1,
+    launch: {
+      title: "Smithers workflow workbench",
+      status: "error",
+      viewId: mcpWorkbenchViewId(undefined, undefined),
+      resourceUri: MCP_WORKBENCH_RESOURCE_URI,
+    },
+    graphSummary: { nodeCount: 0, edgeCount: 0, hasErrors: true },
+    capabilities: mcpWorkbenchCapabilities(),
+    error: normalizeToolError(code, message, details),
+  };
+}
+
+function mcpWorkbenchCapabilities() {
+  return {
+    canRenderGraph: true,
+    canCreateWorkflow: true,
+    canEditSource: true,
+    canStartRun: true,
+    canInspectRuns: true,
+  };
+}
+
+function summarizeRenderGraph(graph: unknown) {
+  const record = isRecord(graph) ? graph : {};
+  const nodes = Array.isArray(record.nodes) ? record.nodes : [];
+  const edges = Array.isArray(record.edges) ? record.edges : [];
+  return {
+    title: typeof record.title === "string" ? record.title : undefined,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    defaultSelectedNodeId:
+      typeof record.defaultSelected === "string"
+        ? record.defaultSelected
+        : undefined,
+    hasErrors: nodes.some(
+      (node) =>
+        isRecord(node) &&
+        typeof node.status === "string" &&
+        /error|failed/i.test(node.status)
+    ),
+  };
+}
+
+function byteLengthJson(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+function mcpWorkbenchViewId(
+  projectRoot?: string,
+  workflowId?: string,
+  runId = "preview"
+) {
+  return `custom-harness:${stableHash(projectRoot ?? "no-project")}:${workflowId ?? "none"}:${runId}`;
+}
+
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function normalizeToolError(
+  code: string,
+  message: string,
+  details?: Record<string, unknown>
+): NormalizedToolError {
+  return { code, message, retryable: true, details };
+}
+
+async function mcpRenderWorkflowGraph(args: {
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  workflowId: string;
+  input?: Record<string, unknown>;
+  outputs?: Record<string, unknown[]>;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+}) {
+  const request = new Request(
+    `http://custom-harness.local/api/workflows/${encodeURIComponent(args.workflowId)}/graph?input=${encodeURIComponent(JSON.stringify(args.input ?? {}))}&outputs=${encodeURIComponent(JSON.stringify(args.outputs ?? {}))}`
+  );
+  const response = await workflowGraphResponse({
+    request,
+    projectRoot: args.projectRoot,
+    defaultWorkflowId: args.defaultWorkflowId,
+    workflowId: args.workflowId,
+    renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+  });
+  return await response.json();
+}
+
+let cachedMcpWorkbenchHtml: string | null = null;
+async function mcpWorkbenchHtml() {
+  if (process.env.NODE_ENV === "production" && cachedMcpWorkbenchHtml) {
+    return cachedMcpWorkbenchHtml;
+  }
+  const entrypoint = join(import.meta.dirname, "mcp", "workbenchApp.ts");
+  const output = await Bun.build({
+    entrypoints: [entrypoint],
+    target: "browser",
+    format: "esm",
+    minify: false,
+    sourcemap: "none",
+  });
+  if (!output.success) {
+    const message = output.logs.map((log) => log.message).join("\n");
+    throw new Error(`MCP workbench app build failed: ${message}`);
+  }
+  const script = await output.outputs[0].text();
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CustomHarness Smithers Workbench</title>
+<style>
+  :root { color-scheme: light dark; --bg: var(--color-background-primary, #101010); --panel: var(--color-background-secondary, #181818); --text: var(--color-text-primary, #f4f4f4); --muted: var(--color-text-secondary, #a2a2a2); --border: var(--color-border-primary, #333); --accent: var(--color-accent-primary, #8ab4ff); --danger: #ff6b6b; --ok: #63d297; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  button, select, textarea { font: inherit; }
+  .loading { padding: 20px; color: var(--muted); }
+  .loading.error, .status.error { color: var(--danger); }
+  .shell { min-height: 100vh; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+  header { display: flex; justify-content: space-between; gap: 16px; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  h1 { margin: 2px 0 4px; font-size: 20px; line-height: 1.1; }
+  h2 { margin: 4px 0 8px; font-size: 18px; }
+  p { margin: 0; color: var(--muted); font-size: 12px; }
+  .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+  .toolbar { display: grid; grid-template-columns: minmax(160px, 220px) minmax(260px, 1fr) auto minmax(120px, auto); gap: 10px; align-items: end; }
+  .creator { grid-template-columns: minmax(260px, 1fr) auto minmax(120px, auto); }
+  label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+  select, textarea, button { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); padding: 8px 10px; }
+  textarea { resize: vertical; min-height: 54px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.ghost { background: transparent; }
+  .status { align-self: center; font-size: 12px; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .workspace { min-height: 620px; display: grid; grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px); gap: 12px; }
+  .canvas, .inspector { border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, transparent); overflow: hidden; }
+  .canvas-title { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .graph { position: relative; min-height: 560px; overflow: auto; }
+  .node { position: absolute; width: 250px; min-height: 118px; display: grid; gap: 5px; text-align: left; border-radius: 12px; }
+  .node.selected { outline: 2px solid var(--accent); }
+  .node-kicker, small { color: var(--muted); font-size: 11px; }
+  .node strong { font-size: 16px; }
+  .inspector { padding: 14px; overflow: auto; }
+  .inspector pre { max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; }
+  .subtle, .empty { color: var(--muted); }
+  body[data-display-mode="fullscreen"] .workspace { min-height: calc(100vh - 180px); }
+  @media (max-width: 860px) { .toolbar, .workspace { grid-template-columns: 1fr; } .graph { min-height: 520px; } }
+</style>
+</head>
+<body><div id="root"></div><script type="module">${script}</script></body>
+</html>`;
+  if (process.env.NODE_ENV === "production") cachedMcpWorkbenchHtml = html;
+  return html;
+}
+
+function withCors(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", "*");
+  headers.set("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
+  headers.set(
+    "access-control-allow-headers",
+    "content-type, mcp-session-id, mcp-protocol-version, last-event-id"
+  );
+  headers.set("access-control-expose-headers", "mcp-session-id");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 function projectResponse(args: {
@@ -538,6 +1245,501 @@ function workflowsResponse(args: {
     defaultWorkflowId: args.defaultWorkflowId,
     workflows: discoverProjectWorkflows(setup.projectRoot),
   };
+}
+
+async function workflowCreateFromPromptResponse(args: {
+  request: Request;
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+  authorWorkflowSource: AuthorWorkflowSourceFn;
+}) {
+  const body = await readJsonBody(args.request);
+  if (typeof body.prompt !== "string" || !body.prompt.trim()) {
+    return json({ ok: false, error: "prompt must be a non-empty string" }, 400);
+  }
+  const data = await createWorkflowFromPrompt({
+    projectRoot: args.projectRoot,
+    defaultWorkflowId: args.defaultWorkflowId,
+    prompt: body.prompt,
+    requestedWorkflowId:
+      typeof body.workflowId === "string" ? body.workflowId : undefined,
+    displayName:
+      typeof body.displayName === "string" ? body.displayName : undefined,
+    model: typeof body.model === "string" ? body.model : undefined,
+    overwrite: body.overwrite === true,
+    renderProjectWorkflowGraph: args.renderProjectWorkflowGraph,
+    authorWorkflowSource: args.authorWorkflowSource,
+  });
+  return json(data, data.ok ? (data.verified ? 201 : 202) : 400);
+}
+
+async function createWorkflowFromPrompt(args: {
+  projectRoot?: string;
+  defaultWorkflowId?: string;
+  prompt: string;
+  requestedWorkflowId?: string;
+  displayName?: string;
+  model?: string;
+  overwrite?: boolean;
+  renderProjectWorkflowGraph: RenderProjectWorkflowGraphFn;
+  authorWorkflowSource: AuthorWorkflowSourceFn;
+}) {
+  const setup = projectSetup(args);
+  if (!setup.ok) return setup;
+  const prompt = args.prompt.trim();
+  if (!prompt) return { ok: false, error: "prompt must be a non-empty string" };
+  let workflowId: string;
+  try {
+    workflowId = resolveWorkflowId({
+      projectRoot: setup.projectRoot,
+      requestedWorkflowId: args.requestedWorkflowId,
+      prompt,
+      overwrite: Boolean(args.overwrite),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: message };
+  }
+  const displayName =
+    normalizeDisplayName(args.displayName) ?? titleFromWorkflowId(workflowId);
+  const workflowPath = join(
+    setup.projectRoot,
+    ".smithers",
+    "workflows",
+    `${workflowId}.tsx`
+  );
+  const attempts: Array<{
+    kind: "generate" | "validate" | "repair" | "verify";
+    ok: boolean;
+    model?: string;
+    error?: string;
+  }> = [];
+
+  const authorModel = normalizeOpenRouterModelId(args.model);
+  let authored: { source: string; model: string };
+  try {
+    authored = await args.authorWorkflowSource({
+      prompt,
+      workflowId,
+      displayName,
+      model: authorModel,
+    });
+    authored.source = extractWorkflowSource(
+      authored.source,
+      workflowId,
+      displayName
+    );
+    attempts.push({ kind: "generate", ok: true, model: authored.model });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    attempts.push({ kind: "generate", ok: false, error: message });
+    return {
+      ok: false,
+      error: message,
+      workflowId,
+      displayName,
+      workflowPath,
+      attempts,
+    };
+  }
+
+  let currentSource = authored.source;
+  let validationError: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const issues = generatedWorkflowSourceValidationIssues(
+      currentSource,
+      prompt
+    );
+    if (!issues.length) {
+      attempts.push({ kind: "validate", ok: true });
+      validationError = undefined;
+      break;
+    }
+    validationError = workflowSourceValidationFeedback(issues);
+    attempts.push({ kind: "validate", ok: false, error: validationError });
+    try {
+      const repaired = await args.authorWorkflowSource({
+        prompt,
+        workflowId,
+        displayName,
+        model: authorModel,
+        previousSource: currentSource,
+        repairError: validationError,
+      });
+      currentSource = extractWorkflowSource(
+        repaired.source,
+        workflowId,
+        displayName
+      );
+      attempts.push({ kind: "repair", ok: true, model: repaired.model });
+    } catch (repairError) {
+      const message =
+        repairError instanceof Error
+          ? repairError.message
+          : String(repairError);
+      attempts.push({ kind: "repair", ok: false, error: message });
+      break;
+    }
+  }
+  if (validationError) {
+    return {
+      ok: false,
+      error: validationError,
+      workflowId,
+      displayName,
+      workflowPath,
+      attempts,
+    };
+  }
+
+  mkdirSync(join(setup.projectRoot, ".smithers", "workflows"), {
+    recursive: true,
+  });
+  atomicWriteFile(workflowPath, currentSource);
+  let graph: unknown = null;
+  let verified = false;
+  let verificationError: string | undefined;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const snapshot = await args.renderProjectWorkflowGraph({
+        projectRoot: setup.projectRoot,
+        workflowId,
+        workflowPath,
+        input: { prompt },
+        outputs: {},
+      });
+      graph = smithersSnapshotToRenderGraph({
+        snapshot,
+        goal: prompt,
+        path: "workflow",
+        reason:
+          "Generated Smithers Workflow Source render-verified without executing tasks.",
+        runId: snapshot.runId,
+        planningLatencyMs: null,
+        tokens: null,
+        submittedAt: new Date(),
+      });
+      applyProjectWorkflowInputNode(
+        graph as ReturnType<typeof smithersSnapshotToRenderGraph>,
+        workflowId,
+        { prompt }
+      );
+      verified = true;
+      verificationError = undefined;
+      attempts.push({ kind: "verify", ok: true });
+      break;
+    } catch (error) {
+      verificationError =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
+      attempts.push({ kind: "verify", ok: false, error: verificationError });
+      if (attempt >= 2) break;
+      try {
+        const repaired = await args.authorWorkflowSource({
+          prompt,
+          workflowId,
+          displayName,
+          model: authorModel,
+          previousSource: currentSource,
+          repairError: verificationError,
+        });
+        currentSource = extractWorkflowSource(
+          repaired.source,
+          workflowId,
+          displayName
+        );
+        atomicWriteFile(workflowPath, currentSource);
+        attempts.push({ kind: "repair", ok: true, model: repaired.model });
+      } catch (repairError) {
+        const message =
+          repairError instanceof Error
+            ? repairError.message
+            : String(repairError);
+        attempts.push({ kind: "repair", ok: false, error: message });
+        break;
+      }
+    }
+  }
+
+  const tracePath = writeWorkflowCreationTrace({
+    projectRoot: setup.projectRoot,
+    workflowId,
+    displayName,
+    prompt,
+    model: authored.model,
+    workflowPath,
+    attempts,
+    verified,
+    verificationError,
+  });
+
+  return {
+    ok: true,
+    workflowId,
+    displayName,
+    workflowPath,
+    tracePath,
+    verified,
+    verificationError,
+    attempts,
+    graph,
+    source: currentSource,
+  };
+}
+
+function resolveWorkflowId(args: {
+  projectRoot: string;
+  requestedWorkflowId?: string;
+  prompt: string;
+  overwrite: boolean;
+}) {
+  const base = args.requestedWorkflowId
+    ? normalizeWorkflowId(args.requestedWorkflowId)
+    : normalizeWorkflowId(args.prompt) || "generated-workflow";
+  if (!base) throw new RequestValidationError("workflowId is invalid");
+  const workflowsDir = join(args.projectRoot, ".smithers", "workflows");
+  const pathFor = (id: string) => join(workflowsDir, `${id}.tsx`);
+  if (args.requestedWorkflowId) {
+    if (!args.overwrite && existsSync(pathFor(base))) {
+      throw new RequestValidationError(
+        `Workflow already exists: ${base}. Pass overwrite=true or choose a new workflowId.`
+      );
+    }
+    return base;
+  }
+  if (args.overwrite || !existsSync(pathFor(base))) return base;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!existsSync(pathFor(candidate))) return candidate;
+  }
+  throw new RequestValidationError(
+    `Could not allocate a workflow id for ${base}`
+  );
+}
+
+function normalizeWorkflowId(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("-");
+}
+
+function normalizeDisplayName(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 80) : undefined;
+}
+
+function normalizeOpenRouterModelId(value?: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const withoutProviderPrefix = trimmed.replace(/^openrouter\//i, "");
+  const lower = withoutProviderPrefix.toLowerCase();
+  if (/\bopus\b/.test(lower) && /4[\s.-]*6/.test(lower)) {
+    return lower.includes("fast")
+      ? "anthropic/claude-opus-4.6-fast"
+      : "anthropic/claude-opus-4.6";
+  }
+  if (/\bsonnet\b/.test(lower) && /4[\s.-]*6/.test(lower)) {
+    return "anthropic/claude-sonnet-4.6";
+  }
+  if (/\bgpt\b/.test(lower) && /5[\s.-]*5/.test(lower)) {
+    return lower.includes("pro") ? "openai/gpt-5.5-pro" : "openai/gpt-5.5";
+  }
+  if (/\bgemini\b/.test(lower) && /3[\s.-]*1/.test(lower)) {
+    return "google/gemini-3.1-pro-preview";
+  }
+  const aliases: Record<string, string> = {
+    "anthropic/opus-4.6": "anthropic/claude-opus-4.6",
+    "anthropic/opus-4.6-fast": "anthropic/claude-opus-4.6-fast",
+    "anthropic/sonnet-4.6": "anthropic/claude-sonnet-4.6",
+  };
+  return aliases[withoutProviderPrefix] ?? withoutProviderPrefix;
+}
+
+function requestedThinking(value: string) {
+  const lower = value.toLowerCase();
+  if (/\bx[-\s]?high\b|\bextra[-\s]?high\b/.test(lower)) return "xhigh";
+  if (/\bhigh\b/.test(lower)) return "high";
+  if (/\bmedium\b/.test(lower)) return "medium";
+  if (/\blow\b/.test(lower)) return "low";
+  if (/\bminimal\b/.test(lower)) return "minimal";
+  return undefined;
+}
+
+function titleFromWorkflowId(workflowId: string) {
+  return workflowId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function atomicWriteFile(path: string, source: string) {
+  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}-${crypto.randomUUID()}`;
+  writeFileSync(tempPath, source);
+  renameSync(tempPath, path);
+}
+
+function extractWorkflowSource(
+  source: string,
+  workflowId: string,
+  displayName: string
+) {
+  const fence = /```(?:tsx|typescript|ts|jsx)?\s*([\s\S]*?)```/i.exec(source);
+  const extracted = (fence ? fence[1] : source).trim();
+  if (
+    !extracted.includes("createSmithers") ||
+    !extracted.includes("export default")
+  ) {
+    throw new RequestValidationError(
+      "Generated content did not look like Smithers TSX Workflow Source"
+    );
+  }
+  const header = `// smithers-source: generated\n// smithers-display-name: ${displayName}\n`;
+  const withoutDuplicateHeader = extracted.replace(
+    /^(?:\/\/ smithers-source:.*\n)?(?:\/\/ smithers-display-name:.*\n)?/,
+    ""
+  );
+  const withHeader = `${header}${withoutDuplicateHeader}`;
+  return withHeader.includes("/** @jsxImportSource smithers-orchestrator */")
+    ? withHeader.endsWith("\n")
+      ? withHeader
+      : `${withHeader}\n`
+    : `${header}/** @jsxImportSource smithers-orchestrator */\n${withoutDuplicateHeader}\n`;
+}
+
+function generatedWorkflowSourceValidationIssues(
+  source: string,
+  request: string
+) {
+  const issues: string[] = [];
+  const lowerRequest = request.toLowerCase();
+  const requestedOpenRouter = lowerRequest.includes("openrouter");
+  if (requestedOpenRouter && !hasSourceString(source, "openrouter")) {
+    issues.push(
+      'The user requested OpenRouter. Every PiAgent for those requested models must use provider: "openrouter".'
+    );
+  }
+  if (source.includes('"openrouter/') || source.includes("'openrouter/")) {
+    issues.push(
+      'Do not put the "openrouter/" prefix in PiAgent model values. Keep provider: "openrouter" and use model ids like "openai/gpt-5.5".'
+    );
+  }
+  if (
+    mentionsModel(lowerRequest, "opus", "4.6") &&
+    !source.includes("anthropic/claude-opus-4.6")
+  ) {
+    issues.push(
+      'The request mentions Opus 4.6 on OpenRouter. Use provider: "openrouter" and model: "anthropic/claude-opus-4.6".'
+    );
+  }
+  if (
+    mentionsModel(lowerRequest, "sonnet", "4.6") &&
+    !source.includes("anthropic/claude-sonnet-4.6")
+  ) {
+    issues.push(
+      'The request mentions Sonnet 4.6 on OpenRouter. Use provider: "openrouter" and model: "anthropic/claude-sonnet-4.6".'
+    );
+  }
+  if (
+    mentionsModel(lowerRequest, "gpt", "5.5") &&
+    !source.includes("openai/gpt-5.5")
+  ) {
+    issues.push(
+      'The request mentions GPT-5.5 on OpenRouter. Use provider: "openrouter" and model: "openai/gpt-5.5".'
+    );
+  }
+  const thinking = requestedThinking(request);
+  if (thinking && !hasSourceString(source, thinking)) {
+    issues.push(
+      `The request asks for thinking ${thinking}. Add thinking: "${thinking}" to the relevant PiAgent options.`
+    );
+  }
+  if (/ctx\.latest\(\s*["'][^"']+["']\s*\)/.test(source)) {
+    issues.push(
+      'ctx.latest requires both a schema key and node id: ctx.latest("schemaKey", "node-id").'
+    );
+  }
+  if (/ctx\.iterationCount\(\s*["'][^"']+["']\s*\)/.test(source)) {
+    issues.push(
+      'ctx.iterationCount requires both a schema key and node id: ctx.iterationCount("schemaKey", "node-id").'
+    );
+  }
+  if (/<Loop[\s\S]*?until=\{\s*\(/.test(source)) {
+    issues.push(
+      'Loop until must be a boolean expression from ctx state, for example until={ctx.outputMaybe("review", { nodeId: "review" })?.approved === true}; do not pass a callback function.'
+    );
+  }
+  return issues;
+}
+
+function workflowSourceValidationFeedback(issues: string[]) {
+  return `Generated workflow source failed CustomHarness validation. Repair the TSX source using these exact hints:\n\n${issues.map((issue, index) => `${index + 1}. ${issue}`).join("\n")}\n\nReturn only the complete repaired TSX source file.`;
+}
+
+function hasSourceString(source: string, value: string) {
+  return source.includes(`"${value}"`) || source.includes(`'${value}'`);
+}
+
+function mentionsModel(text: string, family: string, version: string) {
+  return text.includes(family) && text.includes(version);
+}
+
+function writeWorkflowCreationTrace(args: {
+  projectRoot: string;
+  workflowId: string;
+  displayName: string;
+  prompt: string;
+  model: string;
+  workflowPath: string;
+  attempts: Array<{
+    kind: string;
+    ok: boolean;
+    model?: string;
+    error?: string;
+  }>;
+  verified: boolean;
+  verificationError?: string;
+}) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const traceDir = join(
+    args.projectRoot,
+    ".smithers",
+    "workbench",
+    "creation-traces",
+    args.workflowId
+  );
+  mkdirSync(traceDir, { recursive: true });
+  const tracePath = join(traceDir, `${timestamp}.md`);
+  const attempts = args.attempts
+    .map(
+      (attempt, index) =>
+        `| ${index + 1} | ${attempt.kind} | ${attempt.ok ? "ok" : "failed"} | ${attempt.model ?? ""} | ${escapeMarkdownTable(attempt.error ?? "")} |`
+    )
+    .join("\n");
+  writeFileSync(
+    tracePath,
+    `# Workflow creation trace: ${args.workflowId}\n\n` +
+      `- Display name: ${args.displayName}\n` +
+      `- Workflow path: ${args.workflowPath}\n` +
+      `- Model: ${args.model}\n` +
+      `- Verified: ${args.verified}\n\n` +
+      `## Original request\n\n${args.prompt}\n\n` +
+      `## Attempts\n\n| # | Kind | Status | Model | Error |\n|---:|---|---|---|---|\n${attempts}\n\n` +
+      (args.verificationError
+        ? `## Final verification error\n\n\`\`\`\n${args.verificationError}\n\`\`\`\n`
+        : "")
+  );
+  return tracePath;
+}
+
+function escapeMarkdownTable(value: string) {
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>").slice(0, 2000);
 }
 
 async function smithersRunsListResponse(args: {
@@ -839,11 +2041,8 @@ async function workflowSourceFieldResponse(args: {
 }
 
 function readEditableStringValue(source: string, sourcePath: string[]) {
-  const parsed = parseEditableAgentModelPath(sourcePath);
-  const block = findEditableObjectBlock(source, "agents");
-  const property = findObjectProperty(block, parsed.agentId);
-  const modelMatch = /model\s*:\s*(["'`])([\s\S]*?)(\1)/m.exec(property.value);
-  return modelMatch?.[2] ? unescapeQuotedString(modelMatch[2]) : null;
+  const target = findEditableStringTarget(source, sourcePath);
+  return unescapeQuotedString(source.slice(target.valueStart, target.valueEnd));
 }
 
 function replaceEditableStringValue(
@@ -851,39 +2050,59 @@ function replaceEditableStringValue(
   sourcePath: string[],
   value: string
 ) {
-  const parsed = parseEditableAgentModelPath(sourcePath);
-  const agentsBlock = findEditableObjectBlock(source, "agents");
-  const agentProperty = findObjectProperty(agentsBlock, parsed.agentId);
-  const modelMatch = /model\s*:\s*(["'`])([\s\S]*?)(\1)/m.exec(
-    agentProperty.value
-  );
-  if (!modelMatch || modelMatch.index === undefined) {
-    throw new RequestValidationError(
-      `Could not find editable.agents.${parsed.agentId}.model in workflow source`
-    );
-  }
-  const quote = modelMatch[1];
-  const modelValueStart =
-    agentProperty.valueStart +
-    modelMatch.index +
-    modelMatch[0].indexOf(quote) +
-    1;
-  const modelValueEnd = modelValueStart + modelMatch[2].length;
-  return `${source.slice(0, modelValueStart)}${escapeForQuotedString(value, quote)}${source.slice(modelValueEnd)}`;
+  const target = findEditableStringTarget(source, sourcePath);
+  return `${source.slice(0, target.valueStart)}${escapeForQuotedString(value, target.quote)}${source.slice(target.valueEnd)}`;
 }
 
-function parseEditableAgentModelPath(sourcePath: string[]) {
-  if (sourcePath.length !== 3 || sourcePath[0] !== "agents") {
+function findEditableStringTarget(source: string, sourcePath: string[]) {
+  if (sourcePath.length < 2) {
     throw new RequestValidationError(
-      "Only editable.agents.<id>.model fields are supported for structured saves right now"
+      "sourcePath must point at a string under the editable object"
     );
   }
-  const [, agentId, fieldName] = sourcePath;
-  if (fieldName !== "model")
+  let block = findEditableObjectBlock(source, sourcePath[0]);
+  for (const segment of sourcePath.slice(1, -1)) {
+    block = findObjectProperty(block, segment);
+  }
+  return findStringProperty(block, sourcePath[sourcePath.length - 1]);
+}
+
+function findStringProperty(
+  block: { source: string; start: number; end: number; body: string },
+  propertyName: string
+) {
+  const propertyMatch = new RegExp(
+    escapeRegExp(propertyName) + "\\s*:\\s*([\\\"'`])",
+    "m"
+  ).exec(block.body);
+  if (!propertyMatch || propertyMatch.index === undefined) {
     throw new RequestValidationError(
-      "Only agent model fields are supported for structured saves right now"
+      `Could not find string property ${propertyName} in editable workflow source`
     );
-  return { agentId };
+  }
+  const quote = propertyMatch[1];
+  const quoteStart =
+    block.start + 1 + propertyMatch.index + propertyMatch[0].lastIndexOf(quote);
+  const valueStart = quoteStart + 1;
+  const valueEnd = findClosingQuote(block.source, quoteStart, quote);
+  return { quote, valueStart, valueEnd };
+}
+
+function findClosingQuote(source: string, quoteStart: number, quote: string) {
+  let escaped = false;
+  for (let index = quoteStart + 1; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) {
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === quote) {
+      return index;
+    }
+  }
+  throw new RequestValidationError(
+    "Could not parse editable string in workflow source"
+  );
 }
 
 function findEditableObjectBlock(source: string, propertyName: string) {
@@ -927,6 +2146,10 @@ function findObjectProperty(
     block.start + 1 + propertyMatch.index + propertyMatch[0].lastIndexOf("{");
   const closeBrace = findMatchingBrace(block.source, openBrace);
   return {
+    source: block.source,
+    start: openBrace,
+    end: closeBrace,
+    body: block.source.slice(openBrace + 1, closeBrace),
     valueStart: openBrace,
     valueEnd: closeBrace + 1,
     value: block.source.slice(openBrace, closeBrace + 1),
@@ -1137,8 +2360,7 @@ async function workflowRunResponse(args: {
   const input = body.input === undefined ? {} : body.input;
   if (!isRecord(input))
     return json({ ok: false, error: "input must be a JSON object" }, 400);
-  const promptOverrides = parsePromptOverrides(body.promptOverrides);
-  if (promptOverrides !== undefined) {
+  if (body.promptOverrides !== undefined) {
     return json(
       {
         ok: false,
@@ -1234,6 +2456,171 @@ async function runProjectWorkflow(options: {
     runId: parsed.runId,
     status: typeof parsed.status === "string" ? parsed.status : "running",
   };
+}
+
+async function authorWorkflowSource(options: {
+  prompt: string;
+  workflowId: string;
+  displayName: string;
+  model?: string;
+  previousSource?: string;
+  repairError?: string;
+}): Promise<{ source: string; model: string }> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "OPENROUTER_API_KEY is required to generate Smithers Workflow Source from natural language"
+    );
+  }
+  const model = normalizeOpenRouterModelId(
+    options.model ??
+      process.env.CUSTOM_HARNESS_AUTHOR_MODEL ??
+      "anthropic/claude-sonnet-4.6"
+  )!;
+  const messages = options.previousSource
+    ? workflowRepairMessages(options)
+    : workflowAuthorMessages(options);
+  const response = await fetch(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "http-referer": "http://localhost/custom-harness",
+        "x-title": "CustomHarness Smithers Workflow Authoring",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.2,
+      }),
+    }
+  );
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `OpenRouter generation failed: ${response.status} ${response.statusText}: ${text.slice(0, 2000)}`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `OpenRouter returned invalid JSON: ${message}; ${text.slice(0, 1000)}`
+    );
+  }
+  const content = openRouterMessageContent(parsed);
+  if (!content.trim())
+    throw new Error("OpenRouter returned an empty workflow source response");
+  return { source: content, model };
+}
+
+function workflowAuthorMessages(options: {
+  prompt: string;
+  workflowId: string;
+  displayName: string;
+}) {
+  return [
+    {
+      role: "system",
+      content: smithersAuthorSystemPrompt(),
+    },
+    {
+      role: "user",
+      content:
+        `Create an ordinary Smithers Workflow Source file.\n\n` +
+        `Workflow ID: ${options.workflowId}\n` +
+        `Display name: ${options.displayName}\n\n` +
+        `Natural-language workflow request:\n${options.prompt}\n\n` +
+        `Return only one complete TSX source file, no prose.`,
+    },
+  ];
+}
+
+function workflowRepairMessages(options: {
+  prompt: string;
+  workflowId: string;
+  displayName: string;
+  previousSource?: string;
+  repairError?: string;
+}) {
+  return [
+    {
+      role: "system",
+      content: smithersAuthorSystemPrompt(),
+    },
+    {
+      role: "user",
+      content:
+        `Repair this generated Smithers Workflow Source. Keep the same workflow ID and intent.\n\n` +
+        `Workflow ID: ${options.workflowId}\n` +
+        `Display name: ${options.displayName}\n\n` +
+        `Original request:\n${options.prompt}\n\n` +
+        `Render/type/import error:\n\`\`\`\n${options.repairError ?? "unknown error"}\n\`\`\`\n\n` +
+        `Previous source:\n\`\`\`tsx\n${options.previousSource ?? ""}\n\`\`\`\n\n` +
+        `Return only the complete repaired TSX source file, no prose.`,
+    },
+  ];
+}
+
+function smithersAuthorSystemPrompt() {
+  return `You write ordinary Smithers workflow-pack TSX files. Smithers Workflow Source is TSX/JSX DSL for workflows, not React DOM UI.
+
+Hard requirements:
+- Return only a complete .tsx source file. No markdown explanation.
+- Use /** @jsxImportSource smithers-orchestrator */ near the top.
+- Import only from "smithers-orchestrator" and "zod" unless a normal Smithers component import is truly necessary.
+- Prefer: import { createSmithers, PiAgent } from "smithers-orchestrator"; import { z } from "zod";
+- Create an input schema with prompt: z.string().default(...). The CustomHarness v0 browser UI always sends the primary textarea as ctx.input.prompt and ctx.input.request; domain-specific names like plan or idea must be optional aliases, not the only required input.
+- If the user asks for a domain input such as plan, define plan: z.string().optional() and use const userPlan = ctx.input.plan || ctx.input.prompt; never render user-facing prompts from ctx.input.plan alone.
+- Use createSmithers({ input: inputSchema, ...outputSchemas }).
+- Export default smithers((ctx) => { ... return (<Workflow name="..."><Sequence>...</Sequence></Workflow>); });
+- Use real Smithers control-flow primitives when requested: Sequence for ordered steps, Parallel for fanout, Branch for conditional paths, and Loop for iterative "until/max rounds" flows.
+- If the user asks for a loop, retry cycle, repeated review, or "until approved", use <Loop until={ctx.outputMaybe("schemaKey", { nodeId: "loop-task-id" })?.approved === true} maxIterations={...} onMaxReached="return-last">. Do not pass a callback function to until. Do not unroll it into duplicate serial tasks unless the user explicitly asks for a fixed number of separate steps.
+- Always call ctx.latest and ctx.iterationCount with both arguments: ctx.latest("schemaKey", "node-id") and ctx.iterationCount("schemaKey", "node-id"). Never call ctx.latest("schemaKey") or ctx.iterationCount("schemaKey") with the node id omitted.
+- Treat requests for "same agent", "same chat", "same thread", "original planner", "go back to the first agent", or similar as a request for continuity of role and context, not automatic conversational/session memory. Prefer reusing the same PiAgent variable/config/model and explicitly paste/read prior task outputs in the later Task prompt with ctx.outputMaybe/ctx.latest. Say in comments/prompts that the later task receives the prior plan/output as context.
+- Do not imply real same-chat/thread continuity, hidden memory, or access to a previous task's transcript. The installed Smithers/PiAgent surface exposes session/resume flags, but workflow generation must not use them for task-to-task continuity unless the user explicitly asks for low-level Pi session flags and accepts that session identity/lifecycle is an advanced runtime concern. The safe default is same role/config + explicit prior outputs/context.
+- Every Task must have a stable kebab-case id, a label, an output schema, and an agent.
+- Use OpenRouter as the runtime provider whenever the user mentions OpenRouter. In Smithers source this means PiAgent must use provider: "openrouter" while model receives the OpenRouter model id without an "openrouter/" prefix.
+- Examples: user text "openrouter/openai/gpt-5.5" becomes new PiAgent({ provider: "openrouter", model: "openai/gpt-5.5" }); user text "openrouter/anthropic/opus-4.6" becomes new PiAgent({ provider: "openrouter", model: "anthropic/claude-opus-4.6" }).
+- Default to "anthropic/claude-sonnet-4.6" for all tasks unless the user asks for multi-model review.
+- For multi-model review, use only these known-valid IDs: "anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.6", "openai/gpt-5.5", "google/gemini-3.1-pro-preview". Do not use deprecated IDs such as "anthropic/claude-3.5-sonnet".
+- Render verification does not execute agents, so invalid model IDs may only fail at run time. Be conservative and use the known-valid IDs above.
+- Render-time must not execute shell commands, read arbitrary files, or perform network calls.
+- Use ctx.outputMaybe("schemaKey", { nodeId: "task-id" }) for upstream outputs when composing downstream prompts; never call outputMaybe without the nodeId options object.
+- If several Tasks share the same output shape, register one schema key (for example review: reviewSchema) and read per-task rows with ctx.outputMaybe("review", { nodeId: "market-review" }); do not register the same raw Zod schema object under multiple keys.
+- Include a small const editable object and Task meta.editor fields for prompt/model/label controls on every generated Task.
+- The editor metadata shape must be exactly: meta={{ editor: { editable: true, fields: { prompt: { label: "Prompt template", kind: "multiline-text", sourcePath: ["tasks", "taskKey", "prompt"], value: editable.tasks.taskKey.prompt }, model: { label: "Model", kind: "model-select", sourcePath: ["agents", "main", "model"], value: editable.agents.main.model }, label: { label: "Display label", kind: "multiline-text", sourcePath: ["tasks", "taskKey", "label"], value: editable.tasks.taskKey.label } } } }}.
+- Do not use meta={{ editor: { prompt: ... } }}; that is not editable by CustomHarness.
+- Do not invent a CustomHarness IR, draft DB, or non-Smithers runtime.
+- Keep source concise: 2-6 tasks unless the request clearly needs more.
+
+Known-good shape:
+const { Workflow, Task, Sequence, Parallel, smithers } = createSmithers({ input: inputSchema, summary: summarySchema });
+const agent = new PiAgent({ provider: "openrouter", model: editable.agents.main.model });
+export default smithers((ctx) => {
+  const userPrompt = ctx.input.prompt;
+  return (<Workflow name="workflow-id"><Sequence><Task id="summarize" label={editable.tasks.summarize.label} output={summarySchema} agent={agent}>Prompt text {userPrompt}</Task></Sequence></Workflow>);
+});`;
+}
+
+function openRouterMessageContent(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.choices)) return "";
+  const first = value.choices.find(isRecord);
+  const message = first && isRecord(first.message) ? first.message : undefined;
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) =>
+        isRecord(part) && typeof part.text === "string" ? part.text : ""
+      )
+      .join("\n");
+  }
+  return "";
 }
 
 async function withCwd<T>(cwd: string, fn: () => Promise<T>): Promise<T> {
@@ -1381,12 +2768,6 @@ function safeStaticPath(rootDir: string, pathname: string) {
   return fullPath;
 }
 
-function safeSegment(value: string) {
-  if (!/^[a-zA-Z0-9._-]+$/.test(value))
-    throw new Error(`Invalid run id: ${value}`);
-  return value;
-}
-
 function contentType(path: string) {
   switch (extname(path)) {
     case ".html":
@@ -1435,12 +2816,22 @@ if (import.meta.main) {
   console.log(
     `custom-harness web server listening on http://localhost:${port}`
   );
-  if (cliOptions.projectRoot) {
+  const launchRootDir = resolve(cliOptions.rootDir ?? process.cwd());
+  const launchProjectRoot = resolveProjectRootOption(
+    launchRootDir,
+    cliOptions.projectRoot
+  );
+  if (launchProjectRoot) {
     console.log(
-      `project workflow viewer: ${cliOptions.projectRoot}${cliOptions.workflowId ? `#${cliOptions.workflowId}` : ""}`
+      `project workflow viewer: ${launchProjectRoot}${cliOptions.workflowId ? `#${cliOptions.workflowId}` : ""}`
     );
   }
   await new Promise(() => undefined);
+}
+
+function resolveProjectRootOption(rootDir: string, projectRoot?: string) {
+  if (projectRoot) return resolve(projectRoot);
+  return existsSync(join(rootDir, ".smithers")) ? rootDir : undefined;
 }
 
 function parseServerArgs(args: string[]): HarnessServerOptions {
@@ -1456,11 +2847,6 @@ function parseServerArgs(args: string[]): HarnessServerOptions {
       const value = args[i + 1];
       if (!value) throw new Error("Missing value for --workflow");
       out.workflowId = value;
-      i += 1;
-    } else if (arg === "--runs-dir") {
-      const value = args[i + 1];
-      if (!value) throw new Error("Missing value for --runs-dir");
-      out.runsDir = value;
       i += 1;
     }
   }

@@ -17,8 +17,16 @@ A source-defined sequence/graph of LLM-agent tasks intended to run autonomously 
 _Avoid_: Harness, script, demo graph
 
 **Workflow Source**:
-The Smithers workflow-pack files that define an agentic workflow, primarily `.smithers/workflows/*.tsx` plus related prompts/components.
-_Avoid_: Visual graph as source of truth, persisted workflow IR
+The Smithers workflow-pack files that define an agentic workflow, primarily `.smithers/workflows/*.tsx` Smithers TSX/JSX DSL plus related prompts/components.
+_Avoid_: Visual graph as source of truth, persisted workflow IR, React UI component
+
+**Generated Workflow Source**:
+Ordinary Workflow Source initially created from a natural-language authoring request and saved directly into the Smithers workflow pack.
+_Avoid_: Draft database, `runs/drafts`, CustomHarness-only workflow draft, generated graph JSON as source, generated React app
+
+**Smithers Pattern Component**:
+An importable Smithers workflow component, such as `Panel` or `GatherAndSynthesize`, that composes runtime primitives into a reusable topology.
+_Avoid_: Runtime primitive, CustomHarness topology type, persisted workflow IR
 
 **Workflow Graph**:
 A visual projection of a Smithers `GraphSnapshot` used for previewing and inspecting workflow structure.
@@ -61,17 +69,20 @@ CustomHarness-owned metadata under Smithers `Task.meta.editor` that maps rendere
 _Avoid_: Smithers core feature, Studio metadata, viewer data
 
 **Legacy Run Artifacts**:
-The old CustomHarness `runs/<runId>/` JSON files kept for compatibility with earlier harness/demo flows.
-_Avoid_: Canonical project-mode run state
+Old CustomHarness `runs/<runId>/` JSON files that may exist from earlier harness/demo flows but are no longer created by supported project-mode paths.
+_Avoid_: Canonical project-mode run state, new workflow/run storage
 
 **Project Workflow Viewer**:
 The current browser surface in CustomHarness for rendering, launching, inspecting, and lightly editing one Smithers project workflow.
-_Avoid_: Calling it the whole product, project mode as a standalone noun
+_Avoid_: Calling it the whole product, project mode as a standalone noun, treating its visual styling as canonical
 
 ## Relationships
 
 - **CustomHarness** uses **Smithers** as an external workflow runtime and persistence substrate for project workflows.
 - **Workflow Source** renders into a **Workflow Graph**; the graph is a projection, not source of truth.
+- Smithers `.tsx` files are **Workflow Source** using the Smithers JSX DSL, not React UI components.
+- **Generated Workflow Source** may use **Smithers Pattern Components** or raw Smithers primitives, but CustomHarness must not persist either choice as its own topology model.
+- **Generated Workflow Source** is **Workflow Source** from the moment it is written; any draft status is metadata/provenance, not a separate storage layer.
 - A **Run** is created by launching **Workflow Source** with runtime input.
 - A **Run** produces **Smithers Run State** in `smithers.db` and may produce optional observability logs.
 - A historical **Run Inspection** uses the selected **Run**'s **Run Frame** as its **Workflow Graph** source; current **Workflow Source** is for previewing, editing, and future **Runs**.
@@ -84,6 +95,7 @@ _Avoid_: Calling it the whole product, project mode as a standalone noun
 - **Legacy Run Artifacts** may remain for compatibility but must not decide project workflow truth.
 - CustomHarness adapters should preserve **Smithers Run State** fidelity until the final UI projection step; reducing it early into a CustomHarness-specific interface loses provenance without adding authority.
 - The **Smithers Inspection API** is owned by CustomHarness and shaped around the installed Smithers package; it is not a plan to migrate code or concepts upstream into Smithers.
+- The **Project Workflow Viewer** is the behavioral reference for future UI adapters: component inventory, hierarchy, state transitions, provenance language, and safety semantics are meaningful; colors, ornament, exact dimensions, and implementation structure are not.
 
 ## Example dialogue
 
@@ -95,6 +107,9 @@ _Avoid_: Calling it the whole product, project mode as a standalone noun
 >
 > **Dev:** "If I change a model in the inspector, does it change the run I'm looking at?"
 > **Domain expert:** "No. Model Configuration is written to Workflow Source and affects future runs; historical Run Inspection stays tied to the run that already happened."
+>
+> **Dev:** "Should the natural-language creator save a draft under `runs/drafts` first?"
+> **Domain expert:** "No. It should write Generated Workflow Source under `.smithers/workflows/` and verify it through Smithers; provenance docs may explain that it is draft-quality."
 
 ## Flagged ambiguities
 
@@ -105,3 +120,6 @@ _Avoid_: Calling it the whole product, project mode as a standalone noun
 - Mech/Robotech language may be useful as branding, but should not become canonical developer-facing terminology unless it proves useful through repeated use.
 - Resolved direction: historical **Run Inspection** should not overlay Smithers DB state onto the current **Workflow Graph**. It should reconstruct the inspected graph from the selected **Run**'s persisted **Run Frame**, with current-source graph rendering only as a clearly labeled fallback during migration.
 - `Task.meta.studio` was rejected as legacy prototype naming during this discussion. **Editor Metadata** now lives under `Task.meta.editor`; no compatibility promise is kept for prototype-only `meta.studio` fixtures.
+- "Draft" was used to imply a separate workflow-draft entity or database. Resolved: natural-language authoring produces **Generated Workflow Source** directly in the Smithers workflow pack; draft-ness can be captured as source/provenance metadata only.
+- "React workflow" was used loosely to mean Smithers `.tsx`/JSX. Resolved: call this **Workflow Source** or Smithers TSX/JSX DSL; reserve React language for browser/MCP App UI implementation.
+- "Built-in pattern" was ambiguous between Smithers runtime primitives and shipped Smithers library components. Resolved: use **Smithers Pattern Component** for importable components like `Panel`, `ReviewLoop`, and `GatherAndSynthesize`; they compose primitives and are not runtime substrate.
