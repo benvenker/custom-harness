@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>custom-harness — Smithers durable outcome runner</title>
+<title>custom-harness — Smithers workflow workbench</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -205,6 +205,15 @@
   }
   .btn .arrow { transition: transform .2s; }
   .btn:hover .arrow { transform: translateX(3px); }
+  .btn-spinner {
+    width: 10px;
+    height: 10px;
+    border: 1px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .btn.ghost {
     background: transparent;
@@ -677,6 +686,40 @@
     border-color: var(--workflow);
     background: rgba(29,60,255,0.05);
   }
+  .control-flow-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .control-flow-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border: 1px solid var(--workflow);
+    background: rgba(29,60,255,0.06);
+    color: var(--workflow);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .control-flow-badge.loop {
+    border-color: var(--ok);
+    color: var(--ok);
+    background: rgba(44,122,63,0.07);
+  }
+  .control-flow-icon {
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+  .control-flow-badge.branch {
+    border-color: var(--warn);
+    color: var(--warn);
+    background: rgba(183,121,31,0.06);
+  }
   .node.harness-node .tool-chip.active {
     color: var(--harness);
     border-color: var(--harness);
@@ -860,6 +903,181 @@
     overflow-wrap: anywhere;
     max-height: 280px;
     overflow: auto;
+  }
+  .workflow-select {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 9px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    max-width: 240px;
+  }
+  .workflow-select[hidden] { display: none; }
+  .modal-field {
+    margin-bottom: 14px;
+  }
+  .modal-field label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .modal-input,
+  .modal-textarea {
+    width: 100%;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 9px 11px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .modal-textarea {
+    min-height: 180px;
+    resize: vertical;
+    font-family: var(--serif);
+    font-size: 17px;
+    letter-spacing: -0.005em;
+  }
+  .modal-input:focus,
+  .modal-textarea:focus {
+    outline: 2px solid var(--workflow);
+    outline-offset: -1px;
+  }
+  .modal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .modal-error {
+    min-height: 18px;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--harness);
+    letter-spacing: 0.04em;
+  }
+  .create-progress {
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 11px 12px;
+    margin: 12px 0 4px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+  .create-progress[hidden] { display: none; }
+  .create-progress-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--workflow);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .create-progress-glyph {
+    width: 10px;
+    height: 10px;
+    border: 1px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    flex: 0 0 auto;
+  }
+  .create-progress.is-complete .create-progress-head { color: var(--ok); }
+  .create-progress.is-error .create-progress-head { color: var(--harness); }
+  .create-progress.is-complete .create-progress-glyph,
+  .create-progress.is-error .create-progress-glyph {
+    border: none;
+    animation: none;
+    width: auto;
+    height: auto;
+  }
+  .create-progress.is-complete .create-progress-glyph::before { content: "✓"; }
+  .create-progress.is-error .create-progress-glyph::before { content: "!"; }
+  .create-progress-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .create-progress-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+  }
+  .create-progress-step::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1px solid var(--hair);
+    background: var(--paper);
+    flex: 0 0 auto;
+  }
+  .create-progress-step.done { color: var(--ink-2); }
+  .create-progress-step.done::before { background: var(--ok); border-color: var(--ok); }
+  .create-progress-step.active { color: var(--workflow); }
+  .create-progress-step.active::before {
+    background: var(--workflow);
+    border-color: var(--workflow);
+    box-shadow: 0 0 0 3px rgba(29,60,255,0.12);
+    animation: pulse-blue 1.4s ease-in-out infinite;
+  }
+  .create-progress-step.error { color: var(--harness); }
+  .create-progress-step.error::before { background: var(--harness); border-color: var(--harness); animation: none; }
+  .modal-note {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .modal-guide {
+    margin-top: 10px;
+    border: 1px solid var(--hair);
+    background: var(--bone-2);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .modal-guide summary {
+    cursor: pointer;
+    color: var(--workflow);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .modal-guide ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+  }
+  .modal-guide li { margin: 4px 0; }
+  .modal-guide code {
+    background: var(--paper);
+    border: 1px solid var(--hair);
+    padding: 1px 4px;
+  }
+  .output-modal.create-workflow-modal {
+    width: min(760px, 92vw);
+  }
+  .output-modal-form {
+    margin: 0;
+  }
+  @media (max-width: 720px) {
+    .modal-grid { grid-template-columns: 1fr; }
   }
   .output-meta {
     font-family: var(--mono);
@@ -1047,10 +1265,45 @@
     line-height: 1.55;
   }
   .output-markdown {
-    white-space: pre-wrap;
+    white-space: normal;
     overflow-wrap: anywhere;
     word-break: normal;
   }
+  .output-markdown h2,
+  .output-markdown h3,
+  .output-markdown h4,
+  .output-markdown p,
+  .output-markdown ul { margin: 0 0 12px; }
+  .output-markdown h2,
+  .output-markdown h3,
+  .output-markdown h4 { font-family: var(--serif); line-height: 1.15; }
+  .output-markdown h2 { font-size: 24px; }
+  .output-markdown h3 { font-size: 20px; }
+  .output-markdown h4 { font-size: 17px; }
+  .output-markdown ul { padding-left: 22px; }
+  .output-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 14px;
+    font-family: var(--serif);
+    font-size: 15px;
+  }
+  .output-markdown th,
+  .output-markdown td {
+    border: 1px solid var(--hair);
+    padding: 7px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .output-markdown th {
+    background: var(--bone-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .output-markdown code { font-family: var(--mono); font-size: .84em; background: var(--bone-2); border: 1px solid var(--hair); padding: 1px 4px; }
+  .output-markdown .md-gap { height: 6px; }
   .output-markdown pre {
     font-family: var(--mono);
     font-size: 12px;
@@ -1121,6 +1374,8 @@
     <textarea class="goal-edit" id="goalInput" rows="2">Audit AGENTS.md and README.md for stale references and propose a unified rewrite.</textarea>
     <div class="goal-row">
       <div class="goal-actions">
+        <select class="workflow-select" id="workflowSelect" aria-label="Select Smithers workflow" hidden></select>
+        <button class="btn ghost" id="newWorkflowBtn" title="Create a Smithers workflow from a natural-language prompt">New Workflow</button>
         <button class="btn" id="planBtn">Plan &amp; Run <span class="arrow">→</span></button>
         <button class="btn ghost" id="rerunBtn" disabled>Rerun Selected</button>
         <button class="btn ghost" id="runWorkflowBtn" disabled title="Start a full Smithers run from the selected workflow file">Start Full Run</button>
@@ -1211,6 +1466,52 @@
       </div>
       <div class="output-modal-body" id="outputModalBody"></div>
     </div>
+  </div>
+
+  <div class="output-modal-backdrop" id="createWorkflowModalBackdrop" hidden>
+    <form class="output-modal output-modal-form create-workflow-modal" id="createWorkflowForm" role="dialog" aria-modal="true" aria-labelledby="createWorkflowModalTitle">
+      <div class="output-modal-head">
+        <div>
+          <div class="output-meta">Smithers Workflow Source</div>
+          <div class="output-modal-title" id="createWorkflowModalTitle">New workflow from prompt</div>
+        </div>
+        <div class="output-modal-actions">
+          <button class="btn ghost" id="cancelCreateWorkflowBtn" type="button">Cancel</button>
+          <button class="btn" id="submitCreateWorkflowBtn" type="submit"><span class="submit-label">Go</span> <span class="arrow">→</span></button>
+        </div>
+      </div>
+      <div class="output-modal-body">
+        <div class="modal-field">
+          <label for="createWorkflowPrompt"><span>Describe the workflow</span><span>natural language</span></label>
+          <textarea class="modal-textarea" id="createWorkflowPrompt" required spellcheck="true" placeholder="Example: Take a bug report, reproduce it, inspect likely files, propose a fix, then run tests."></textarea>
+          <div class="modal-note">Use normal typing or your OS/browser dictation. This creates ordinary .smithers/workflows/*.tsx source, then opens it for review and editing.</div>
+          <details class="modal-guide">
+            <summary>What can I ask for?</summary>
+            <ul>
+              <li><b>Sequence:</b> “do A, then B, then C.”</li>
+              <li><b>Parallel fanout:</b> “send three agents to review independently, then synthesize.”</li>
+              <li><b>Branch:</b> “if tests fail, diagnose; otherwise write release notes.”</li>
+              <li><b>Loop:</b> “review and revise until approved, max 5 rounds.” Smithers supports <code>&lt;Loop&gt;</code>; ask for “until” or “max rounds” when you want a real loop instead of repeated serial steps.</li>
+              <li><b>Human/review gate:</b> “pause for approval before publishing.”</li>
+              <li><b>Data handoff:</b> “use the first task’s output as context for the next task.”</li>
+            </ul>
+          </details>
+        </div>
+        <div class="modal-field">
+          <label for="createWorkflowModel"><span>Authoring model</span><span>OpenRouter</span></label>
+          <div class="model-select-combo" id="createWorkflowModelCombo" data-current-value="anthropic/claude-sonnet-4.6">
+            <input class="model-select-input" id="createWorkflowModel" autocomplete="off" spellcheck="false" value="anthropic/claude-sonnet-4.6" placeholder="Search OpenRouter models...">
+            <div class="model-select-menu" hidden></div>
+          </div>
+          <div class="modal-note">Workflow ID and display name are derived from your description. You can rename the source file later if needed.</div>
+        </div>
+        <div class="create-progress" id="createWorkflowProgress" aria-live="polite" hidden>
+          <div class="create-progress-head"><span class="create-progress-glyph"></span><span id="createWorkflowProgressTitle">Creating workflow…</span></div>
+          <ol class="create-progress-list" id="createWorkflowProgressSteps"></ol>
+        </div>
+        <div class="modal-error" id="createWorkflowError" aria-live="polite"></div>
+      </div>
+    </form>
   </div>
 
   <footer>
@@ -1427,6 +1728,7 @@
   const canvasSvg   = document.getElementById("canvasSvg");
   const inspector   = document.getElementById("inspectorContent");
   const runsSelect  = document.getElementById("runsSelect");
+  const workflowSelect = document.getElementById("workflowSelect");
   const goalInput   = document.getElementById("goalInput");
   const inputStepLabel = document.getElementById("inputStepLabel");
   const inputHelpLabel = document.getElementById("inputHelpLabel");
@@ -1437,6 +1739,7 @@
   const runIdEl     = document.getElementById("runId");
   const execTitle   = document.getElementById("execTitle");
   const planBtn     = document.getElementById("planBtn");
+  const newWorkflowBtn = document.getElementById("newWorkflowBtn");
   const rerunBtn    = document.getElementById("rerunBtn");
   const runWorkflowBtn = document.getElementById("runWorkflowBtn");
   const cancelWorkflowRunBtn = document.getElementById("cancelWorkflowRunBtn");
@@ -1449,6 +1752,17 @@
   const outputModalBody = document.getElementById("outputModalBody");
   const copyOutputBtn = document.getElementById("copyOutputBtn");
   const closeOutputBtn = document.getElementById("closeOutputBtn");
+  const createWorkflowModalBackdrop = document.getElementById("createWorkflowModalBackdrop");
+  const createWorkflowForm = document.getElementById("createWorkflowForm");
+  const cancelCreateWorkflowBtn = document.getElementById("cancelCreateWorkflowBtn");
+  const submitCreateWorkflowBtn = document.getElementById("submitCreateWorkflowBtn");
+  const createWorkflowPrompt = document.getElementById("createWorkflowPrompt");
+  const createWorkflowModelCombo = document.getElementById("createWorkflowModelCombo");
+  const createWorkflowModel = document.getElementById("createWorkflowModel");
+  const createWorkflowProgress = document.getElementById("createWorkflowProgress");
+  const createWorkflowProgressTitle = document.getElementById("createWorkflowProgressTitle");
+  const createWorkflowProgressSteps = document.getElementById("createWorkflowProgressSteps");
+  const createWorkflowError = document.getElementById("createWorkflowError");
   const sampleBtns  = document.querySelectorAll(".sample-btn");
 
   let currentSample = "audit";
@@ -1477,6 +1791,16 @@
   let runRefreshTimer = null;
   let projectRunInspection = null;
   let projectRunInspectionSeq = 0;
+  const createWorkflowProgressLabels = [
+    "Generating Smithers source…",
+    "Validating workflow metadata…",
+    "Rendering graph preview…",
+    "Opening source editor…",
+  ];
+  let createWorkflowProgressTimer = null;
+  let createWorkflowProgressIndex = 0;
+  let createWorkflowInFlight = false;
+  let createWorkflowClosePending = false;
 
   const NODE_W = 280;
   const NODE_H = 158; // approx — actual height varies, layout tolerates
@@ -1527,6 +1851,7 @@
           <span class="status">${statusText}</span>
         </div>
         <div class="node-body">
+          ${controlFlowBadgesHtml(n)}
           <div class="node-title">${n.title}</div>
           <div class="node-agent">${n.agent}</div>
           <div class="node-prompt">${n.prompt}</div>
@@ -1618,6 +1943,41 @@
     });
   }
 
+  function controlFlowBadges(node) {
+    return Array.isArray(node?.smithers?.controlFlow) ? node.smithers.controlFlow : [];
+  }
+
+  function controlFlowBadgesHtml(node) {
+    const badges = controlFlowBadges(node);
+    if (badges.length === 0) return "";
+    return `<div class="control-flow-badges">${badges.map(controlFlowBadgeHtml).join("")}</div>`;
+  }
+
+  function controlFlowInspectorHtml(node) {
+    const badges = controlFlowBadges(node);
+    if (badges.length === 0) return "";
+    return `<div class="field">
+      <div class="lbl"><span>Control flow</span><span class="output-meta">Smithers graph metadata</span></div>
+      <div class="control-flow-badges">${badges.map(controlFlowBadgeHtml).join("")}</div>
+      <div class="node-edit-note">Derived from Smithers workflow structure. ${escapeHtml(badges.map(badge => badge.detail).filter(Boolean).join(" · "))}</div>
+    </div>`;
+  }
+
+  function controlFlowBadgeHtml(badge) {
+    const kind = badge?.kind || "";
+    const label = badge?.label || kind;
+    const title = badge?.detail || label || kind;
+    const icon = controlFlowBadgeIcon(kind);
+    return `<span class="control-flow-badge ${escapeHtml(kind)}" title="${escapeHtml(title)}"><span class="control-flow-icon" aria-hidden="true">${escapeHtml(icon)}</span><span>${escapeHtml(label)}</span></span>`;
+  }
+
+  function controlFlowBadgeIcon(kind) {
+    if (kind === "loop") return "↻";
+    if (kind === "parallel") return "⇄";
+    if (kind === "branch") return "◇";
+    return "•";
+  }
+
   function outputRowForNode(node) {
     const detail = liveSmithersDetail();
     if (!node || !detail || !Array.isArray(detail.outputs)) return null;
@@ -1632,13 +1992,14 @@
   function markdownFromOutputRow(output) {
     const row = output?.row;
     if (!row || typeof row !== "object") return "";
-    for (const key of ["markdown", "text", "response", "result"]) {
-      if (typeof row[key] === "string") return row[key];
+    for (const key of ["markdown", "text", "response", "result", "formatted_plan", "formattedPlan", "improved_plan", "improvedPlan", "final_plan", "finalPlan"]) {
+      if (typeof row[key] === "string" && row[key].trim()) return row[key];
     }
     const parsed = {};
     for (const [key, value] of Object.entries(row)) {
       if (["run_id", "node_id", "iteration"].includes(key)) continue;
-      parsed[key] = parseOutputValue(value);
+      const nextValue = parseOutputValue(value);
+      if (nextValue !== null && nextValue !== undefined && nextValue !== "") parsed[key] = nextValue;
     }
     const parts = [];
     if (parsed.title) parts.push(`# ${parsed.title}`);
@@ -1665,7 +2026,118 @@
   }
 
   function renderMarkdownLite(markdown) {
-    return `<pre>${escapeHtml(markdown)}</pre>`;
+    const lines = String(markdown || "").replace(/\\n/g, "\n").split(/\r?\n/);
+    const html = [];
+    let listOpen = false;
+    const closeList = () => {
+      if (listOpen) {
+        html.push("</ul>");
+        listOpen = false;
+      }
+    };
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trimEnd();
+      if (/^```/.test(line.trim())) {
+        closeList();
+        const block = collectMarkdownCodeFence(lines, index);
+        html.push(`<pre>${escapeHtml(block.code)}</pre>`);
+        index = block.nextIndex - 1;
+        continue;
+      }
+      if (isMarkdownTableHeader(line, lines[index + 1] || "")) {
+        closeList();
+        const table = collectMarkdownTable(lines, index);
+        html.push(markdownTableHtml(table.rows));
+        index = table.nextIndex - 1;
+        continue;
+      }
+      const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+      if (heading) {
+        closeList();
+        const level = Math.min(4, heading[1].length + 1);
+        html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+        continue;
+      }
+      const bullet = /^[-*]\s+(.+)$/.exec(line);
+      if (bullet) {
+        if (!listOpen) {
+          html.push("<ul>");
+          listOpen = true;
+        }
+        html.push(`<li>${inlineMarkdown(bullet[1])}</li>`);
+        continue;
+      }
+      const numbered = /^\d+[.)]\s+(.+)$/.exec(line);
+      if (numbered) {
+        if (!listOpen) {
+          html.push("<ul>");
+          listOpen = true;
+        }
+        html.push(`<li>${inlineMarkdown(numbered[1])}</li>`);
+        continue;
+      }
+      closeList();
+      if (!line.trim()) {
+        html.push(`<div class="md-gap"></div>`);
+      } else {
+        html.push(`<p>${inlineMarkdown(line)}</p>`);
+      }
+    }
+    closeList();
+    return html.join("");
+  }
+
+  function collectMarkdownCodeFence(lines, startIndex) {
+    const codeLines = [];
+    let index = startIndex + 1;
+    while (index < lines.length) {
+      if (/^```\s*$/.test(String(lines[index]).trim())) return { code: codeLines.join("\n"), nextIndex: index + 1 };
+      codeLines.push(lines[index]);
+      index += 1;
+    }
+    return { code: codeLines.join("\n"), nextIndex: index };
+  }
+
+  function isMarkdownTableHeader(line, nextLine) {
+    return parseMarkdownTableRow(line).length > 1 && isMarkdownTableSeparator(nextLine);
+  }
+
+  function isMarkdownTableSeparator(line) {
+    const cells = parseMarkdownTableRow(line);
+    return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+  }
+
+  function collectMarkdownTable(lines, startIndex) {
+    const rows = [parseMarkdownTableRow(lines[startIndex])];
+    let index = startIndex + 2;
+    while (index < lines.length) {
+      const row = parseMarkdownTableRow(lines[index]);
+      if (row.length <= 1) break;
+      rows.push(row);
+      index += 1;
+    }
+    return { rows, nextIndex: index };
+  }
+
+  function parseMarkdownTableRow(line) {
+    const trimmed = String(line || "").trim();
+    if (!trimmed.includes("|")) return [];
+    const withoutOuterPipes = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+    return withoutOuterPipes.split("|").map(cell => cell.trim());
+  }
+
+  function markdownTableHtml(rows) {
+    if (!rows.length) return "";
+    const columnCount = rows[0].length;
+    const header = rows[0];
+    const body = rows.slice(1);
+    return `<table><thead><tr>${header.map(cell => `<th>${inlineMarkdown(cell)}</th>`).join("")}</tr></thead><tbody>${body.map(row => `<tr>${Array.from({ length: columnCount }, (_, index) => `<td>${inlineMarkdown(row[index] || "")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  }
+
+  function inlineMarkdown(text) {
+    return escapeHtml(text)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   }
 
   function openOutputViewer(nodeId) {
@@ -2066,7 +2538,7 @@
 
   function renderProjectReadOnlyNote(state) {
     if (state.structuredFields?.length > 0) return "";
-    return `<div class="node-edit-note">No editable studio metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
+    return `<div class="node-edit-note">No editable editor metadata is declared for this task. Use Edit Source (.tsx) for workflow changes.</div>`;
   }
 
   function isHistoricalRunInspection() {
@@ -2392,6 +2864,7 @@
       </div>
       <div class="insp-body">
         ${sourceExplanation}
+        ${controlFlowInspectorHtml(node)}
         ${studioBarHtml}
         ${promptFieldHtml}
         ${outputEditor}
@@ -2564,26 +3037,7 @@
   }
 
   async function runWithEdits() {
-    if (!currentRunId) return;
-    const overrides = pendingOverridesForRun(currentRunId);
-    if (Object.keys(overrides).length === 0) return;
-    setRunButtonsBusy(true);
-    setRunActionStatus(`Forking ${shortId(currentRunId)} with ${Object.keys(overrides).length} edit(s)...`);
-    try {
-      const result = await postJson(`/api/runs/${encodeURIComponent(currentRunId)}/rerun`, {
-        promptOverrides: overrides,
-      });
-      setRunActionStatus(`Forked as ${shortId(result.runId)} · ${result.status}`,
-        result.status === "succeeded" ? "ok" : result.status === "failed" ? "error" : "");
-      // Drafts on the parent run are discarded once we land on the fork; the
-      // forked run.json now carries them as its baseline.
-      promptDrafts.delete(currentRunId);
-      await refreshRuns(result.runId);
-    } catch (err) {
-      setRunActionStatus(`Run with edits failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy prompt-override reruns were removed. Save source-backed edits, then start a new Smithers project run.", "error");
   }
 
   function loadSample(key) {
@@ -2681,6 +3135,7 @@
   }
 
   function setRunButtonsBusy(isBusy) {
+    if (newWorkflowBtn) newWorkflowBtn.disabled = isBusy;
     planBtn.disabled = isBusy || projectModeAvailable;
     rerunBtn.disabled = isBusy || projectModeAvailable || !currentRunId;
     if (runWorkflowBtn) runWorkflowBtn.disabled = isBusy || !canRunWorkflow();
@@ -2961,17 +3416,6 @@
     }
   }
 
-  async function waitForRunToRender(runId) {
-    setCurrentRunId(runId);
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await refreshRuns();
-      const runMeta = await loadRun(runId, { silent: true, preserveStatus: true });
-      if (runMeta) return runMeta;
-      await new Promise(resolve => setTimeout(resolve, 750));
-    }
-    throw new Error("run artifacts not ready");
-  }
-
   function startProjectRunInspection({ runId, inspectionUrl, initialStatus }) {
     projectRunInspectionSeq += 1;
     const seq = projectRunInspectionSeq;
@@ -3090,24 +3534,7 @@
   }
 
   async function startRunFromGoal() {
-    const goal = goalInput.value.trim();
-    if (!goal) {
-      setRunActionStatus("Goal required", "error");
-      return;
-    }
-
-    setRunButtonsBusy(true);
-    setRunActionStatus("Starting run...");
-    try {
-      const result = await postJson("/api/runs", { goal });
-      setRunActionStatus(`Started ${shortId(result.runId)} · ${result.status}`);
-      const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`Running ${shortId(result.runId)} · ${runMeta.status}`, runStatusKind(runMeta.status));
-    } catch (err) {
-      setRunActionStatus(`Run failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy goal-planner runner was removed. Open a Smithers project workflow and use Start Full Run.", "error");
   }
 
   async function cancelProjectRun() {
@@ -3176,76 +3603,165 @@
       return;
     }
 
-    if (!currentRunMeta?.isSmithersWorkflow || !currentRunMeta.workflowPath) {
-      setRunActionStatus("Load a Smithers workflow run first", "error");
-      return;
-    }
-    const sourceRunId = currentRunId;
-    setRunButtonsBusy(true);
-    setRunActionStatus(`Starting fresh run from ${currentRunMeta.workflowPath.split("/").pop()}...`);
-    try {
-      // Bundle any pending studio edits with whatever overrides the parent
-      // already had baked in. New (drafts) win over inherited.
-      const drafts = sourceRunId ? pendingOverridesForRun(sourceRunId) : {};
-      const inherited = currentRunMeta.existingOverrides ?? {};
-      const merged = { ...inherited, ...drafts };
-      const promptOverrides = Object.keys(merged).length > 0 ? merged : undefined;
-
-      const payload = {
-        workflowPath: currentRunMeta.workflowPath,
-        input: currentRunMeta.input ?? {},
-        ...(currentRunMeta.goal ? { goal: currentRunMeta.goal } : {}),
-        ...(promptOverrides ? { promptOverrides } : {}),
-      };
-      const result = await postJson("/api/smithers-runs", payload);
-      // Drafts on the source run are what we just shipped; clear them so the
-      // studio bar resets if the user returns to the parent.
-      if (sourceRunId) promptDrafts.delete(sourceRunId);
-      setRunActionStatus(`Started ${shortId(result.runId)} · loading...`);
-      // RUN WORKFLOW means "start a fresh experiment" — auto-switch to the new
-      // run so the user actually sees something change. (Rerun Selected stays
-      // sticky because that fork's task states would look like regressions.)
-      const runMeta = await waitForRunToRender(result.runId);
-      setRunActionStatus(`${shortId(result.runId)} · ${runMeta.status}`,
-        runStatusKind(runMeta.status));
-    } catch (err) {
-      setRunActionStatus(`Run workflow failed · ${err.message}`, "error");
-    } finally {
-      setRunButtonsBusy(false);
-    }
+    setRunActionStatus("Legacy Smithers-run wrapper was removed. Open a project workflow and use Start Full Run.", "error");
   }
 
   async function rerunCurrentRun() {
-    if (projectModeAvailable) {
-      setRunActionStatus("Rerun Selected is for legacy runs. Use Start Full Run for this Smithers workflow.", "error");
-      return;
-    }
-    if (!currentRunId) {
-      setRunActionStatus("Select a run first", "error");
-      return;
-    }
+    setRunActionStatus("Legacy rerun/fork artifacts were removed. Start a new Smithers project run instead.", "error");
+  }
 
-    const sourceRunId = currentRunId;
+  function setCreateWorkflowSubmitBusy(isBusy) {
+    if (!submitCreateWorkflowBtn) return;
+    submitCreateWorkflowBtn.disabled = isBusy;
+    submitCreateWorkflowBtn.innerHTML = isBusy
+      ? `<span class="btn-spinner" aria-hidden="true"></span><span class="submit-label">Creating…</span>`
+      : `<span class="submit-label">Go</span> <span class="arrow">→</span>`;
+  }
+
+  function stopCreateWorkflowProgressTimer() {
+    if (!createWorkflowProgressTimer) return;
+    clearInterval(createWorkflowProgressTimer);
+    createWorkflowProgressTimer = null;
+  }
+
+  function renderCreateWorkflowProgress(state = "running", activeIndex = createWorkflowProgressIndex, message = "Creating workflow…") {
+    if (!createWorkflowProgress || !createWorkflowProgressTitle || !createWorkflowProgressSteps) return;
+    createWorkflowProgress.hidden = false;
+    createWorkflowProgress.classList.toggle("is-complete", state === "complete");
+    createWorkflowProgress.classList.toggle("is-error", state === "error");
+    createWorkflowProgressTitle.textContent = message;
+    createWorkflowProgressSteps.innerHTML = createWorkflowProgressLabels.map((label, index) => {
+      let stepState = "";
+      if (state === "complete") stepState = "done";
+      else if (state === "error") stepState = index < activeIndex ? "done" : index === activeIndex ? "error" : "";
+      else stepState = index < activeIndex ? "done" : index === activeIndex ? "active" : "";
+      return `<li class="create-progress-step ${stepState}">${escapeHtml(label)}</li>`;
+    }).join("");
+  }
+
+  function startCreateWorkflowProgress() {
+    stopCreateWorkflowProgressTimer();
+    createWorkflowProgressIndex = 0;
+    renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Creating workflow…");
+    createWorkflowProgressTimer = setInterval(() => {
+      createWorkflowProgressIndex = Math.min(createWorkflowProgressIndex + 1, createWorkflowProgressLabels.length - 2);
+      renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Still working…");
+    }, 1800);
+  }
+
+  function finishCreateWorkflowProgress(message = "Workflow created.") {
+    stopCreateWorkflowProgressTimer();
+    createWorkflowProgressIndex = createWorkflowProgressLabels.length - 1;
+    renderCreateWorkflowProgress("complete", createWorkflowProgressIndex, message);
+  }
+
+  function failCreateWorkflowProgress(message = "Workflow creation failed.") {
+    stopCreateWorkflowProgressTimer();
+    renderCreateWorkflowProgress("error", createWorkflowProgressIndex, message);
+  }
+
+  function resetCreateWorkflowProgress() {
+    stopCreateWorkflowProgressTimer();
+    createWorkflowProgressIndex = 0;
+    if (createWorkflowProgress) {
+      createWorkflowProgress.hidden = true;
+      createWorkflowProgress.classList.remove("is-complete", "is-error");
+    }
+    if (createWorkflowProgressTitle) createWorkflowProgressTitle.textContent = "Creating workflow…";
+    if (createWorkflowProgressSteps) createWorkflowProgressSteps.innerHTML = "";
+    setCreateWorkflowSubmitBusy(false);
+    if (cancelCreateWorkflowBtn) cancelCreateWorkflowBtn.disabled = false;
+    createWorkflowInFlight = false;
+    createWorkflowClosePending = false;
+  }
+
+  function openCreateWorkflowModal() {
+    if (!createWorkflowModalBackdrop) return;
+    createWorkflowError.textContent = "";
+    createWorkflowPrompt.value = "";
+    resetCreateWorkflowProgress();
+    createWorkflowModalBackdrop.hidden = false;
+    if (createWorkflowModelCombo) loadOpenRouterModels().then(models => setupModelCombo(createWorkflowModelCombo, models));
+    setTimeout(() => createWorkflowPrompt?.focus(), 0);
+  }
+
+  function closeCreateWorkflowModal() {
+    if (!createWorkflowModalBackdrop || createWorkflowInFlight) return;
+    createWorkflowModalBackdrop.hidden = true;
+    createWorkflowError.textContent = "";
+    resetCreateWorkflowProgress();
+    setRunButtonsBusy(false);
+  }
+
+  function createWorkflowPayloadFromForm() {
+    const prompt = createWorkflowPrompt.value.trim();
+    return {
+      prompt,
+      model: createWorkflowModel.value.trim() || undefined,
+    };
+  }
+
+  async function createWorkflowFromPrompt(event) {
+    event?.preventDefault();
+    if (createWorkflowInFlight) return;
+    const payload = createWorkflowPayloadFromForm();
+    if (!payload.prompt) {
+      createWorkflowError.textContent = "Describe the workflow before creating it.";
+      createWorkflowPrompt.focus();
+      return;
+    }
+    createWorkflowError.textContent = "";
+    createWorkflowInFlight = true;
     setRunButtonsBusy(true);
-    setRunActionStatus(`Forking ${shortId(sourceRunId)}...`);
+    setCreateWorkflowSubmitBusy(true);
+    if (cancelCreateWorkflowBtn) cancelCreateWorkflowBtn.disabled = true;
+    startCreateWorkflowProgress();
+    setRunActionStatus("Creating Smithers Workflow Source from prompt...");
     try {
-      const result = await postJson(`/api/runs/${encodeURIComponent(sourceRunId)}/rerun`, {});
-      // Don't auto-switch the user onto the brand-new fork. A freshly-started
-      // fork has no events yet, so the DAG would render every previously-failed
-      // task as 'pending' — which looks like the parent's state regressed.
-      // Refresh the dropdown so the new id is selectable, and tell the user
-      // it's there.
-      await refreshRuns();
-      setRunActionStatus(`Forked as ${shortId(result.runId)} ·`,
-        result.status === "failed" ? "error" : "ok",
-        result.runId);
-    } catch (err) {
-      setRunActionStatus(`Rerun failed · ${err.message}`, "error");
-      await refreshRuns();
-      if (currentRunId === sourceRunId) {
-        await loadRun(sourceRunId, { silent: true, preserveStatus: true });
+      const result = await postJson("/api/workflows/create-from-prompt", payload);
+      const workflowId = result.workflowId;
+      saveStoredProjectInput(workflowId, payload.prompt);
+      goalInput.value = payload.prompt;
+      createWorkflowProgressIndex = 2;
+      renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Rendering graph preview…");
+      setRunActionStatus(`Created ${workflowId} · opening source editor...`, result.verified ? "ok" : "");
+      const loaded = await loadProjectWorkflowMode(workflowId);
+      createWorkflowProgressIndex = 3;
+      renderCreateWorkflowProgress("running", createWorkflowProgressIndex, "Opening source editor…");
+      if (loaded) {
+        await openWorkflowSourceEditor();
+        finishCreateWorkflowProgress(result.verified ? "Workflow created and verified." : "Workflow created; verification needs review.");
+        setRunActionStatus(
+          result.verified
+            ? `Created ${workflowId} · verified graph · editing source`
+            : `Created ${workflowId} · verification needs review · editing source`,
+          result.verified ? "ok" : "error"
+        );
+      } else {
+        currentWorkflowId = workflowId;
+        currentWorkflowSource = result.source || "";
+        setCurrentRunId(null);
+        if (editSourceBtn) editSourceBtn.disabled = false;
+        renderSourceEditor();
+        finishCreateWorkflowProgress("Workflow source created; graph preview needs review.");
+        setRunActionStatus(`Created ${workflowId}, but graph preview failed · edit source to repair`, "error");
       }
+      createWorkflowInFlight = false;
+      createWorkflowClosePending = true;
+      setTimeout(() => {
+        if (createWorkflowClosePending && !createWorkflowInFlight) closeCreateWorkflowModal();
+      }, 700);
+    } catch (err) {
+      createWorkflowInFlight = false;
+      createWorkflowClosePending = false;
+      failCreateWorkflowProgress("Workflow creation failed.");
+      createWorkflowError.textContent = err.message;
+      setRunActionStatus(`Create workflow failed · ${err.message}`, "error");
     } finally {
+      if (!createWorkflowClosePending) {
+        setCreateWorkflowSubmitBusy(false);
+        if (cancelCreateWorkflowBtn) cancelCreateWorkflowBtn.disabled = false;
+      }
       setRunButtonsBusy(false);
     }
   }
@@ -3306,7 +3822,26 @@
     }
   }
 
-  async function loadProjectWorkflowMode() {
+  function populateWorkflowSelect(workflows, selected) {
+    if (!workflowSelect) return;
+    const rows = Array.isArray(workflows) ? workflows : [];
+    workflowSelect.hidden = rows.length === 0;
+    workflowSelect.innerHTML = rows
+      .map(workflow => `<option value="${escapeHtml(workflow.id)}" ${workflow.id === selected ? "selected" : ""}>${escapeHtml(workflow.id)}</option>`)
+      .join("");
+  }
+
+  function clearProjectWorkflowMode() {
+    projectModeAvailable = false;
+    currentProject = null;
+    currentWorkflowId = null;
+    currentWorkflowGraph = null;
+    projectNodeOutputs.clear();
+    projectNodeOutputTables.clear();
+    populateWorkflowSelect([], null);
+  }
+
+  async function loadProjectWorkflowMode(preferredWorkflowId = null) {
     try {
       const project = await fetch("/api/project", { cache: "no-store" }).then(r => r.ok ? r.json() : null);
       if (!project || project.ok === false) {
@@ -3318,18 +3853,39 @@
         setRunActionStatus(workflows.error || "Could not load workflows", "error");
         return false;
       }
-      const selected = project.defaultWorkflowId
-        || workflows.workflows?.[0]?.id;
-      if (!selected) return false;
+      const available = workflows.workflows ?? [];
+      const storedWorkflowId = preferredWorkflowId ? null : loadStoredSelectedWorkflow(project.projectRoot, available);
+      const selected = preferredWorkflowId && available.some(workflow => workflow.id === preferredWorkflowId)
+        ? preferredWorkflowId
+        : storedWorkflowId
+          || project.defaultWorkflowId
+          || available[0]?.id;
+      if (!selected) {
+        clearProjectWorkflowMode();
+        return false;
+      }
+      const previousProjectInput = goalInput.value;
       goalInput.value = loadStoredProjectInput(selected);
-      const graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      let graphResponse;
+      try {
+        graphResponse = await fetch(projectGraphUrl(selected), { cache: "no-store" }).then(r => r.json());
+      } catch (err) {
+        goalInput.value = previousProjectInput;
+        clearProjectWorkflowMode();
+        setRunActionStatus(`Could not render workflow graph · ${err.message}`, "error");
+        return false;
+      }
       if (graphResponse.ok === false) {
+        goalInput.value = previousProjectInput;
+        clearProjectWorkflowMode();
         setRunActionStatus(graphResponse.error || "Could not render workflow graph", "error");
         return false;
       }
       projectModeAvailable = true;
-      currentProject = { ...project, workflows: workflows.workflows ?? [] };
+      currentProject = { ...project, workflows: available };
       currentWorkflowId = selected;
+      saveStoredSelectedWorkflow(project.projectRoot, selected);
+      populateWorkflowSelect(available, selected);
       currentWorkflowGraph = graphResponse.graph;
       rememberProjectOutputTables(graphResponse.graph);
       await renderProjectGraphForCurrentState({
@@ -3351,8 +3907,31 @@
       return true;
     } catch (err) {
       console.warn("project workflow mode unavailable", err);
+      clearProjectWorkflowMode();
       return false;
     }
+  }
+
+  function selectedWorkflowStorageKey(projectRoot) {
+    return projectRoot ? `custom-harness:selected-workflow:${projectRoot}` : null;
+  }
+
+  function loadStoredSelectedWorkflow(projectRoot, workflows) {
+    const key = selectedWorkflowStorageKey(projectRoot);
+    if (!key) return null;
+    try {
+      const stored = localStorage.getItem(key);
+      const availableIds = new Set((Array.isArray(workflows) ? workflows : []).map(workflow => workflow.id));
+      return stored && availableIds.has(stored) ? stored : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveStoredSelectedWorkflow(projectRoot, workflowId) {
+    const key = selectedWorkflowStorageKey(projectRoot);
+    if (!key || !workflowId) return;
+    try { localStorage.setItem(key, workflowId); } catch {}
   }
 
   function projectInputStorageKey(workflowId) {
@@ -3378,7 +3957,13 @@
   function currentProjectInput() {
     const requestText = currentProjectInputText();
     console.log("[project-input]", requestText);
-    return requestText.trim() ? { request: requestText, prompt: requestText } : {};
+    // The current v0 workbench has one generic runtime-input textarea. Send
+    // common aliases so generated workflows that named their primary input
+    // `plan`, `idea`, or `text` still receive the user's value until the UI is
+    // schema-aware.
+    return requestText.trim()
+      ? { request: requestText, prompt: requestText, plan: requestText, idea: requestText, text: requestText }
+      : {};
   }
 
   function rememberProjectOutputTables(graph) {
@@ -3437,6 +4022,18 @@
     projectInputRefreshTimer = setTimeout(refreshProjectGraphFromInput, 450);
   });
 
+  workflowSelect?.addEventListener("change", async () => {
+    const nextWorkflowId = workflowSelect.value;
+    if (!nextWorkflowId || nextWorkflowId === currentWorkflowId) return;
+    stopProjectRunInspection();
+    currentRunMeta = null;
+    currentWorkflowGraph = null;
+    projectNodeOutputs.clear();
+    projectNodeOutputTables.clear();
+    setRunActionStatus(`Loading workflow ${nextWorkflowId}...`);
+    await loadProjectWorkflowMode(nextWorkflowId);
+  });
+
   // ============ Wiring ============
 
   sampleBtns.forEach(b => b.addEventListener("click", () => {
@@ -3454,6 +4051,12 @@
     renderForkChildren();
   }));
 
+  newWorkflowBtn?.addEventListener("click", openCreateWorkflowModal);
+  createWorkflowForm?.addEventListener("submit", createWorkflowFromPrompt);
+  cancelCreateWorkflowBtn?.addEventListener("click", closeCreateWorkflowModal);
+  createWorkflowModalBackdrop?.addEventListener("click", (event) => {
+    if (event.target === createWorkflowModalBackdrop) closeCreateWorkflowModal();
+  });
   planBtn.addEventListener("click", startRunFromGoal);
   rerunBtn.addEventListener("click", rerunCurrentRun);
   runWorkflowBtn?.addEventListener("click", runWorkflowFresh);
@@ -3486,7 +4089,9 @@
     setRunActionStatus("Copied output markdown", "ok");
   });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !outputModalBackdrop?.hidden) closeOutputViewer();
+    if (event.key !== "Escape") return;
+    if (!createWorkflowModalBackdrop?.hidden) closeCreateWorkflowModal();
+    else if (!outputModalBackdrop?.hidden) closeOutputViewer();
   });
 
   window.addEventListener("resize", () => {

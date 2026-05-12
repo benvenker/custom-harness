@@ -1,11 +1,11 @@
 {
   "name": "custom-harness",
   "version": "0.1.0",
-  "description": "Smithers-first durable outcome runner with compatible harness/workflow artifacts",
+  "description": "Local visual workbench for Smithers workflow source and run state",
   "type": "module",
   "scripts": {
-    "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts",
+    "start": "bun src/server.ts",
+    "dev": "bun --watch src/server.ts",
     "web": "bun src/server.ts",
     "test": "bun test tests/",
     "typecheck": "bun tsc --noEmit",
@@ -13,9 +13,8 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@flue/cli": "^0.3.10",
-    "@flue/sdk": "^0.3.10",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/ext-apps": "1.7.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@types/react": "^19.2.14",
     "react": "^19.2.5",
     "smithers-orchestrator": "^0.18.0",

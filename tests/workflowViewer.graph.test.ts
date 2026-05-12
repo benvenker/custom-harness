@@ -76,6 +76,76 @@ function fakeSnapshot(): GraphSnapshot {
   } as GraphSnapshot;
 }
 
+function fakeControlFlowSnapshot(): GraphSnapshot {
+  return {
+    runId: "fake-control-flow-run",
+    frameNo: 0,
+    xml: {
+      kind: "element",
+      tag: "smithers:workflow",
+      props: { name: "Control Flow Workflow" },
+      children: [
+        {
+          kind: "element",
+          tag: "smithers:ralph",
+          props: { maxIterations: "10", onMaxReached: "return-last" },
+          children: [
+            {
+              kind: "element",
+              tag: "smithers:task",
+              props: { id: "refinement" },
+              children: [],
+            },
+          ],
+        },
+        {
+          kind: "element",
+          tag: "smithers:parallel",
+          props: { maxConcurrency: "2" },
+          children: [
+            {
+              kind: "element",
+              tag: "smithers:task",
+              props: { id: "alt-a" },
+              children: [],
+            },
+            {
+              kind: "element",
+              tag: "smithers:task",
+              props: { id: "alt-b" },
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+    tasks: [
+      {
+        nodeId: "refinement",
+        label: "Plan Refinement Loop",
+        ordinal: 0,
+        prompt: "Refine plan",
+      },
+      {
+        nodeId: "alt-a",
+        label: "Alternative A",
+        ordinal: 1,
+        prompt: "Alternative A",
+        parallelGroupId: "parallel:1",
+        parallelMaxConcurrency: 2,
+      },
+      {
+        nodeId: "alt-b",
+        label: "Alternative B",
+        ordinal: 2,
+        prompt: "Alternative B",
+        parallelGroupId: "parallel:1",
+        parallelMaxConcurrency: 2,
+      },
+    ],
+  } as GraphSnapshot;
+}
+
 function fakeMetadataSnapshot(): GraphSnapshot {
   return {
     runId: "fake-render-run",
@@ -217,6 +287,60 @@ describe("project workflow graph API", () => {
     ]);
     expect(existsSync(join(projectRoot, "runs"))).toBe(false);
     expect(existsSync(join(projectRoot, ".poolside"))).toBe(false);
+  });
+
+  it("returns safe control-flow metadata for loop and parallel badges", async () => {
+    const projectRoot = tempProject("custom-harness-workflow-control-flow-");
+    writeWorkflow(projectRoot, "foo");
+    const handler = createHarnessServerHandler({
+      rootDir: process.cwd(),
+      projectRoot,
+      workflowId: "foo",
+      renderProjectWorkflowGraph: async () => fakeControlFlowSnapshot(),
+    });
+
+    const response = await handler(
+      new Request("http://localhost/api/workflows/foo/graph")
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      ok: boolean;
+      graph: {
+        nodes: Array<{
+          id: string;
+          smithers?: {
+            kind?: string;
+            controlFlow?: Array<{
+              kind: string;
+              label: string;
+              detail?: string;
+              maxIterations?: string;
+              maxConcurrency?: string;
+            }>;
+          };
+        }>;
+      };
+    };
+    const refinement = body.graph.nodes.find((node) => node.id === "refinement");
+    const altA = body.graph.nodes.find((node) => node.id === "alt-a");
+
+    expect(body.ok).toBe(true);
+    expect(refinement?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "loop",
+        label: "LOOP · max 10",
+        detail: "maxIterations=10 · onMaxReached=return-last",
+        maxIterations: "10",
+      }),
+    ]);
+    expect(altA?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "parallel",
+        label: "PARALLEL · max 2",
+        maxConcurrency: "2",
+      }),
+    ]);
   });
 
   it("returns TaskDescriptor meta.editor metadata as structured graph JSON", async () => {

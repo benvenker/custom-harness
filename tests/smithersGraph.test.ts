@@ -1,20 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import React from "react";
-import { Effect } from "effect";
-import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { renderFrame } from "@smithers-orchestrator/engine";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import type {
   GraphSnapshot,
   TaskDescriptor,
   XmlNode,
 } from "@smithers-orchestrator/graph";
 import { smithersSnapshotToRenderGraph } from "../src/runs/smithersGraph.js";
-import { createRunRecorder } from "../src/runs/recorder.js";
 
 function task(
   nodeId: string,
@@ -245,7 +235,7 @@ describe("Smithers graph snapshot mapper", () => {
       snapshot: snapshot(
         el("smithers:workflow", { name: "host-nodes" }, [
           el("smithers:branch", { id: "choose-path" }, [
-            el("smithers:loop", { id: "repeat-until-done" }, [
+            el("smithers:loop", { id: "repeat-until-done", maxIterations: "5" }, [
               el("smithers:worktree", { id: "feature-worktree" }, [
                 el("smithers:task", { id: "inside" }, [text("Inside prompt")]),
               ]),
@@ -265,8 +255,21 @@ describe("Smithers graph snapshot mapper", () => {
         ?.kind
     ).toBe("loop");
     expect(
+      graph.nodes.find((node) => node.id === "repeat-until-done")?.smithers
+        ?.controlFlow
+    ).toEqual([
+      expect.objectContaining({ kind: "branch", label: "BRANCH" }),
+      expect.objectContaining({ kind: "loop", label: "LOOP · max 5" }),
+    ]);
+    expect(
       graph.nodes.find((node) => node.id === "feature-worktree")?.smithers?.kind
     ).toBe("worktree");
+    expect(
+      graph.nodes.find((node) => node.id === "inside")?.smithers?.controlFlow
+    ).toEqual([
+      expect.objectContaining({ kind: "branch", label: "BRANCH" }),
+      expect.objectContaining({ kind: "loop", label: "LOOP · max 5" }),
+    ]);
     expect(graph.edges).toContainEqual({
       from: "feature-worktree",
       to: "inside",
@@ -274,86 +277,66 @@ describe("Smithers graph snapshot mapper", () => {
     });
   });
 
-  it("writes plan.json from a real renderFrame snapshot without depending on the planner workflow DSL layout", async () => {
-    const runsDir = mkdtempSync(
-      join(tmpdir(), "custom-harness-smithers-graph-")
-    );
-    const recorder = createRunRecorder(
-      "frame-plan-test",
-      { goal: "frame graph" },
-      { runsDir }
-    );
-    const schemas = { task: z.object({ result: z.string() }) };
-    const { Workflow, Task, Sequence, Parallel, smithers, outputs } =
-      createSmithers(schemas);
-    const agent = {
-      id: "fake-agent",
-      generate: async () => ({ text: JSON.stringify({ result: "ok" }) }),
-    };
-    const workflow = smithers(() =>
-      React.createElement(
-        Workflow,
-        { name: "native-frame" },
-        React.createElement(
-          Sequence,
-          {},
-          React.createElement(
-            Task,
-            { id: "plan", output: outputs.task, agent },
-            "Plan prompt"
+  it("annotates tasks inside Smithers ralph/Loop and Parallel control-flow containers", () => {
+    const graph = smithersSnapshotToRenderGraph({
+      snapshot: snapshot(
+        el("smithers:workflow", { name: "control-flow" }, [
+          el(
+            "smithers:ralph",
+            { maxIterations: "10", onMaxReached: "return-last" },
+            [el("smithers:task", { id: "refine" }, [text("Refine")])]
           ),
-          React.createElement(
-            Parallel,
-            {},
-            React.createElement(
-              Task,
-              { id: "left", output: outputs.task, agent },
-              "Left prompt"
-            ),
-            React.createElement(
-              Task,
-              { id: "right", output: outputs.task, agent },
-              "Right prompt"
-            )
-          )
-        )
-      )
-    );
-    const ctx = new SmithersCtx({
-      runId: "frame-plan-test",
-      iteration: 0,
-      input: {},
-      outputs: {},
-      zodToKeyName: workflow.zodToKeyName,
+          el("smithers:parallel", { maxConcurrency: "2" }, [
+            el("smithers:task", { id: "left" }, [text("Left")]),
+            el("smithers:task", { id: "right" }, [text("Right")]),
+          ]),
+        ]),
+        [
+          task("refine", { ordinal: 0 }),
+          task("left", {
+            ordinal: 1,
+            parallelGroupId: "parallel:1",
+            parallelMaxConcurrency: 2,
+          }),
+          task("right", {
+            ordinal: 2,
+            parallelGroupId: "parallel:1",
+            parallelMaxConcurrency: 2,
+          }),
+        ]
+      ),
+      ...graphMeta,
     });
-    const frame = await Effect.runPromise(renderFrame(workflow, ctx));
 
-    recorder.writePlan({
-      path: "workflow",
-      reason: "native graph",
-      workflow: {
-        name: "legacy-should-not-drive-graph",
-        description:
-          "This fallback shape should not be used once a frame exists.",
-        root: { type: "task", name: "Legacy Only", prompt: "legacy prompt" },
-      },
-    });
-    recorder.writeSmithersGraphSnapshot(frame);
-
-    const planJson = JSON.parse(
-      readFileSync(join(runsDir, "frame-plan-test", "plan.json"), "utf8")
+    expect(graph.nodes.find((node) => node.id === "loop-0")?.smithers).toEqual(
+      expect.objectContaining({
+        kind: "loop",
+        controlFlow: [
+          expect.objectContaining({
+            kind: "loop",
+            label: "LOOP · max 10",
+            maxIterations: "10",
+            onMaxReached: "return-last",
+          }),
+        ],
+      })
     );
-    expect(planJson.graph.source).toEqual({ kind: "smithers", frameNo: 0 });
-    expect(
-      planJson.graph.nodes.map((node: { id: string }) => node.id)
-    ).toContain("left");
-    expect(
-      planJson.graph.nodes.map((node: { id: string }) => node.id)
-    ).not.toContain("legacy-only");
-    expect(planJson.graph.edges).toContainEqual({
-      from: "plan",
-      to: "left",
-      label: "parallel",
-    });
+    expect(graph.nodes.find((node) => node.id === "refine")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "loop",
+        label: "LOOP · max 10",
+        detail: "maxIterations=10 · onMaxReached=return-last",
+      }),
+    ]);
+    expect(graph.nodes.find((node) => node.id === "left")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "parallel",
+        label: "PARALLEL · max 2",
+        maxConcurrency: "2",
+      }),
+    ]);
+    expect(graph.nodes.find((node) => node.id === "right")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({ kind: "parallel", label: "PARALLEL · max 2" }),
+    ]);
   });
 });

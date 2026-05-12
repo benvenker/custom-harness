@@ -121,9 +121,9 @@ Write a workflow doc after confirmation:
 
 Include original request, confirmed spec, files written, verification table, repair attempts, known issues, and viewer command.
 
-Strongly recommended alpha trace:
+Strongly recommended workbench trace:
 
-`<project>/.poolside/workflows/creation-traces/<workflow-id>/<timestamp>.md`
+`<project>/.smithers/workbench/creation-traces/<workflow-id>/<timestamp>.md`
 
 Trace contents:
 

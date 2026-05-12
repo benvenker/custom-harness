@@ -10,6 +10,17 @@ export type TimelineEvent = {
   what?: string;
 };
 
+export type ControlFlowBadge = {
+  kind: 'loop' | 'branch' | 'parallel';
+  label: string;
+  detail?: string;
+  hostId?: string;
+  groupId?: string;
+  maxIterations?: string;
+  maxConcurrency?: string;
+  onMaxReached?: string;
+};
+
 export type RenderNode = {
   id: string;
   type: 'goal' | 'planner' | 'task' | 'harness-worker' | 'smithers-host';
@@ -40,6 +51,7 @@ export type RenderNode = {
     worktreeId?: string;
     worktreePath?: string;
     parallelGroupId?: string;
+    controlFlow?: ControlFlowBadge[];
     meta?: Record<string, unknown>;
   };
 };
@@ -128,6 +140,7 @@ export function smithersSnapshotToRenderGraph(args: SmithersGraphMapperArgs): Re
       usedHostIds,
       path: [],
       runPath: args.path,
+      controlFlow: [],
     })
     : emptyLayout();
 
@@ -165,9 +178,10 @@ function layoutSmithersElement(
     usedHostIds: Set<string>;
     path: number[];
     runPath: RunPath;
+    controlFlow: ControlFlowBadge[];
   },
 ): LayoutResult {
-  const tag = stripSmithersPrefix(element.tag);
+  const tag = canonicalHostKind(stripSmithersPrefix(element.tag));
 
   if (tag === 'task') {
     const id = element.props.id;
@@ -200,6 +214,7 @@ function layoutSmithersElement(
         worktreeId: descriptor?.worktreeId,
         worktreePath: descriptor?.worktreePath,
         parallelGroupId: descriptor?.parallelGroupId,
+        controlFlow: controlFlowForTask(descriptor, args.controlFlow),
         meta: descriptor?.meta,
       },
     };
@@ -212,11 +227,13 @@ function layoutSmithersElement(
   });
 
   if (tag === 'parallel') {
+    const parallelBadge = controlFlowBadgeForHost('parallel', element, stableHostId('parallel', args.path, new Set()));
     const childResults = childElements.map(({ element: child, index }) =>
       layoutSmithersElement(child, {
         ...args,
         row: args.row,
         path: [...args.path, index],
+        controlFlow: mergeControlFlow(args.controlFlow, [parallelBadge]),
       }),
     );
     return {
@@ -235,10 +252,11 @@ function layoutSmithersElement(
 
   if (PRESERVED_HOST_TAGS.has(tag)) {
     const id = element.props.id ?? stableHostId(tag, args.path, args.usedHostIds);
+    const hostBadge = controlFlowBadgeForHost(tag, element, id);
     const node: LayoutNode = {
       id,
       type: 'smithers-host',
-      title: titleCase(tag),
+      title: hostTitle(tag),
       x: TASK_COLUMNS[1],
       y: taskY(args.row),
       row: args.row,
@@ -251,11 +269,13 @@ function layoutSmithersElement(
         kind: tag,
         tag: element.tag,
         props: element.props,
+        controlFlow: hostBadge ? mergeControlFlow(args.controlFlow, [hostBadge]) : args.controlFlow,
       },
     };
     const children = layoutSequence(childElements.map(({ element: child }) => child), {
       ...args,
       row: args.row + 1,
+      controlFlow: hostBadge ? mergeControlFlow(args.controlFlow, [hostBadge]) : args.controlFlow,
     }, tag);
     return {
       nodes: [node, ...children.nodes],
@@ -289,6 +309,7 @@ function layoutSequence(
     usedHostIds: Set<string>;
     path: number[];
     runPath: RunPath;
+    controlFlow: ControlFlowBadge[];
   },
   rootKind: string,
 ): LayoutResult {
@@ -375,6 +396,98 @@ function asElement(node: XmlNode | null): XmlElement | null {
 
 function stripSmithersPrefix(tag: string) {
   return tag.replace(/^smithers:/, '');
+}
+
+function canonicalHostKind(tag: string) {
+  return tag === 'ralph' ? 'loop' : tag;
+}
+
+function hostTitle(tag: string) {
+  if (tag === 'loop') return 'Loop';
+  if (tag === 'branch') return 'Branch';
+  if (tag === 'parallel') return 'Parallel';
+  return titleCase(tag);
+}
+
+function controlFlowBadgeForHost(
+  tag: string,
+  element: XmlElement,
+  hostId: string,
+): ControlFlowBadge | null {
+  if (tag === 'loop') {
+    const maxIterations = element.props.maxIterations;
+    const onMaxReached = element.props.onMaxReached;
+    return {
+      kind: 'loop',
+      hostId,
+      label: maxIterations ? `LOOP · max ${maxIterations}` : 'LOOP',
+      detail: [
+        maxIterations ? `maxIterations=${maxIterations}` : '',
+        onMaxReached ? `onMaxReached=${onMaxReached}` : '',
+      ].filter(Boolean).join(' · ') || undefined,
+      maxIterations,
+      onMaxReached,
+    };
+  }
+  if (tag === 'branch') {
+    return {
+      kind: 'branch',
+      hostId,
+      label: 'BRANCH',
+      detail: element.props.id ? `id=${element.props.id}` : undefined,
+    };
+  }
+  if (tag === 'parallel') {
+    const maxConcurrency = element.props.maxConcurrency;
+    return {
+      kind: 'parallel',
+      groupId: element.props.id ?? hostId,
+      label: maxConcurrency ? `PARALLEL · max ${maxConcurrency}` : 'PARALLEL',
+      detail: maxConcurrency ? `maxConcurrency=${maxConcurrency}` : undefined,
+      maxConcurrency,
+    };
+  }
+  return null;
+}
+
+function controlFlowForTask(
+  descriptor: TaskDescriptor | undefined,
+  inherited: ControlFlowBadge[],
+): ControlFlowBadge[] | undefined {
+  const inheritedHasParallel = inherited.some((badge) => badge.kind === 'parallel');
+  const fromDescriptor = descriptor?.parallelGroupId && !inheritedHasParallel
+    ? [{
+      kind: 'parallel' as const,
+      groupId: descriptor.parallelGroupId,
+      label: descriptor.parallelMaxConcurrency
+        ? `PARALLEL · max ${descriptor.parallelMaxConcurrency}`
+        : 'PARALLEL',
+      detail: descriptor.parallelMaxConcurrency
+        ? `maxConcurrency=${descriptor.parallelMaxConcurrency}`
+        : undefined,
+      maxConcurrency: descriptor.parallelMaxConcurrency == null
+        ? undefined
+        : String(descriptor.parallelMaxConcurrency),
+    }]
+    : [];
+  const merged = mergeControlFlow(inherited, fromDescriptor);
+  return merged.length > 0 ? merged : undefined;
+}
+
+function mergeControlFlow(
+  base: ControlFlowBadge[],
+  extra: Array<ControlFlowBadge | null | undefined>,
+): ControlFlowBadge[] {
+  const merged: ControlFlowBadge[] = [];
+  const seen = new Set<string>();
+  for (const badge of [...base, ...extra]) {
+    if (!badge) continue;
+    const key = `${badge.kind}:${badge.hostId ?? badge.groupId ?? badge.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(badge);
+  }
+  return merged;
 }
 
 function textContent(element: XmlElement): string {
