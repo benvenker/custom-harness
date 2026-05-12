@@ -22,5 +22,7 @@ jobs:
           ./node_modules/.bin/tsc --version
       - name: Type check
         run: ./node_modules/.bin/tsc --noEmit
+      - name: Prepare local Smithers project marker
+        run: mkdir -p .smithers/workflows
       - name: Tests
         run: bun test tests/
