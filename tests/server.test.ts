@@ -973,6 +973,21 @@ describe("HTTP server DB-backed Smithers run inspection API", () => {
     ).toEqual({ ok: true, ...readerEvents });
   });
 
+  it("guides workflow authoring to use explicit context handoff rather than implying same chat/thread continuity", () => {
+    const source = readFileSync(join(process.cwd(), "src", "server.ts"), "utf8");
+    const promptStart = source.indexOf("function smithersAuthorSystemPrompt()");
+    const promptSource = source.slice(promptStart);
+
+    expect(promptSource).toContain('"same agent", "same chat", "same thread", "original planner"');
+    expect(promptSource).toContain("continuity of role and context");
+    expect(promptSource).toContain("reusing the same PiAgent variable/config/model");
+    expect(promptSource).toContain("ctx.outputMaybe/ctx.latest");
+    expect(promptSource).toContain("Do not imply real same-chat/thread continuity");
+    expect(promptSource).toContain("hidden memory");
+    expect(promptSource).toContain("session/resume flags");
+    expect(promptSource).toContain("same role/config + explicit prior outputs/context");
+  });
+
   it("creates generated Workflow Source from a prompt and records failed render verification", async () => {
     const projectRoot = tempProjectWithCurrentWorkflowSource();
     let authorPrompt = "";

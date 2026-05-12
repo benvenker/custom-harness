@@ -235,7 +235,7 @@ describe("Smithers graph snapshot mapper", () => {
       snapshot: snapshot(
         el("smithers:workflow", { name: "host-nodes" }, [
           el("smithers:branch", { id: "choose-path" }, [
-            el("smithers:loop", { id: "repeat-until-done" }, [
+            el("smithers:loop", { id: "repeat-until-done", maxIterations: "5" }, [
               el("smithers:worktree", { id: "feature-worktree" }, [
                 el("smithers:task", { id: "inside" }, [text("Inside prompt")]),
               ]),
@@ -255,12 +255,88 @@ describe("Smithers graph snapshot mapper", () => {
         ?.kind
     ).toBe("loop");
     expect(
+      graph.nodes.find((node) => node.id === "repeat-until-done")?.smithers
+        ?.controlFlow
+    ).toEqual([
+      expect.objectContaining({ kind: "branch", label: "BRANCH" }),
+      expect.objectContaining({ kind: "loop", label: "LOOP · max 5" }),
+    ]);
+    expect(
       graph.nodes.find((node) => node.id === "feature-worktree")?.smithers?.kind
     ).toBe("worktree");
+    expect(
+      graph.nodes.find((node) => node.id === "inside")?.smithers?.controlFlow
+    ).toEqual([
+      expect.objectContaining({ kind: "branch", label: "BRANCH" }),
+      expect.objectContaining({ kind: "loop", label: "LOOP · max 5" }),
+    ]);
     expect(graph.edges).toContainEqual({
       from: "feature-worktree",
       to: "inside",
       label: "",
     });
+  });
+
+  it("annotates tasks inside Smithers ralph/Loop and Parallel control-flow containers", () => {
+    const graph = smithersSnapshotToRenderGraph({
+      snapshot: snapshot(
+        el("smithers:workflow", { name: "control-flow" }, [
+          el(
+            "smithers:ralph",
+            { maxIterations: "10", onMaxReached: "return-last" },
+            [el("smithers:task", { id: "refine" }, [text("Refine")])]
+          ),
+          el("smithers:parallel", { maxConcurrency: "2" }, [
+            el("smithers:task", { id: "left" }, [text("Left")]),
+            el("smithers:task", { id: "right" }, [text("Right")]),
+          ]),
+        ]),
+        [
+          task("refine", { ordinal: 0 }),
+          task("left", {
+            ordinal: 1,
+            parallelGroupId: "parallel:1",
+            parallelMaxConcurrency: 2,
+          }),
+          task("right", {
+            ordinal: 2,
+            parallelGroupId: "parallel:1",
+            parallelMaxConcurrency: 2,
+          }),
+        ]
+      ),
+      ...graphMeta,
+    });
+
+    expect(graph.nodes.find((node) => node.id === "loop-0")?.smithers).toEqual(
+      expect.objectContaining({
+        kind: "loop",
+        controlFlow: [
+          expect.objectContaining({
+            kind: "loop",
+            label: "LOOP · max 10",
+            maxIterations: "10",
+            onMaxReached: "return-last",
+          }),
+        ],
+      })
+    );
+    expect(graph.nodes.find((node) => node.id === "refine")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "loop",
+        label: "LOOP · max 10",
+        detail: "maxIterations=10 · onMaxReached=return-last",
+      }),
+    ]);
+    expect(graph.nodes.find((node) => node.id === "left")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({
+        kind: "parallel",
+        label: "PARALLEL · max 2",
+        maxConcurrency: "2",
+      }),
+    ]);
+    expect(graph.nodes.find((node) => node.id === "right")?.smithers?.controlFlow).toEqual([
+      expect.objectContaining({ kind: "parallel", label: "PARALLEL · max 2" }),
+    ]);
   });
 });

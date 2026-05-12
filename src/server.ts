@@ -1660,6 +1660,21 @@ function generatedWorkflowSourceValidationIssues(
       `The request asks for thinking ${thinking}. Add thinking: "${thinking}" to the relevant PiAgent options.`
     );
   }
+  if (/ctx\.latest\(\s*["'][^"']+["']\s*\)/.test(source)) {
+    issues.push(
+      'ctx.latest requires both a schema key and node id: ctx.latest("schemaKey", "node-id").'
+    );
+  }
+  if (/ctx\.iterationCount\(\s*["'][^"']+["']\s*\)/.test(source)) {
+    issues.push(
+      'ctx.iterationCount requires both a schema key and node id: ctx.iterationCount("schemaKey", "node-id").'
+    );
+  }
+  if (/<Loop[\s\S]*?until=\{\s*\(/.test(source)) {
+    issues.push(
+      'Loop until must be a boolean expression from ctx state, for example until={ctx.outputMaybe("review", { nodeId: "review" })?.approved === true}; do not pass a callback function.'
+    );
+  }
   return issues;
 }
 
@@ -2563,6 +2578,11 @@ Hard requirements:
 - If the user asks for a domain input such as plan, define plan: z.string().optional() and use const userPlan = ctx.input.plan || ctx.input.prompt; never render user-facing prompts from ctx.input.plan alone.
 - Use createSmithers({ input: inputSchema, ...outputSchemas }).
 - Export default smithers((ctx) => { ... return (<Workflow name="..."><Sequence>...</Sequence></Workflow>); });
+- Use real Smithers control-flow primitives when requested: Sequence for ordered steps, Parallel for fanout, Branch for conditional paths, and Loop for iterative "until/max rounds" flows.
+- If the user asks for a loop, retry cycle, repeated review, or "until approved", use <Loop until={ctx.outputMaybe("schemaKey", { nodeId: "loop-task-id" })?.approved === true} maxIterations={...} onMaxReached="return-last">. Do not pass a callback function to until. Do not unroll it into duplicate serial tasks unless the user explicitly asks for a fixed number of separate steps.
+- Always call ctx.latest and ctx.iterationCount with both arguments: ctx.latest("schemaKey", "node-id") and ctx.iterationCount("schemaKey", "node-id"). Never call ctx.latest("schemaKey") or ctx.iterationCount("schemaKey") with the node id omitted.
+- Treat requests for "same agent", "same chat", "same thread", "original planner", "go back to the first agent", or similar as a request for continuity of role and context, not automatic conversational/session memory. Prefer reusing the same PiAgent variable/config/model and explicitly paste/read prior task outputs in the later Task prompt with ctx.outputMaybe/ctx.latest. Say in comments/prompts that the later task receives the prior plan/output as context.
+- Do not imply real same-chat/thread continuity, hidden memory, or access to a previous task's transcript. The installed Smithers/PiAgent surface exposes session/resume flags, but workflow generation must not use them for task-to-task continuity unless the user explicitly asks for low-level Pi session flags and accepts that session identity/lifecycle is an advanced runtime concern. The safe default is same role/config + explicit prior outputs/context.
 - Every Task must have a stable kebab-case id, a label, an output schema, and an agent.
 - Use OpenRouter as the runtime provider whenever the user mentions OpenRouter. In Smithers source this means PiAgent must use provider: "openrouter" while model receives the OpenRouter model id without an "openrouter/" prefix.
 - Examples: user text "openrouter/openai/gpt-5.5" becomes new PiAgent({ provider: "openrouter", model: "openai/gpt-5.5" }); user text "openrouter/anthropic/opus-4.6" becomes new PiAgent({ provider: "openrouter", model: "anthropic/claude-opus-4.6" }).
