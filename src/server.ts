@@ -1159,7 +1159,7 @@ async function mcpWorkbenchHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CustomHarness Smithers Workbench</title>
 <style>
-  :root { color-scheme: light dark; --bg: var(--color-background-primary, #101010); --panel: var(--color-background-secondary, #181818); --text: var(--color-text-primary, #f4f4f4); --muted: var(--color-text-secondary, #a2a2a2); --border: var(--color-border-primary, #333); --accent: var(--color-accent-primary, #8ab4ff); --danger: #ff6b6b; --ok: #63d297; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+  :root { color-scheme: light dark; --bg: var(--color-background-primary, #101010); --panel: var(--color-background-secondary, #181818); --text: var(--color-text-primary, #f4f4f4); --muted: var(--color-text-secondary, #a2a2a2); --border: var(--color-border-primary, #333); --accent: var(--color-accent-primary, #8ab4ff); --focus-ring: var(--accent); --danger: #ff6b6b; --ok: #63d297; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
   * { box-sizing: border-box; }
   html, body, #root { width: 100%; height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
@@ -1186,7 +1186,10 @@ async function mcpWorkbenchHtml() {
   label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; min-width: 0; }
   .workflow-field { min-width: 260px; }
   .create-field { min-width: 0; }
-  select, textarea, button { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); padding: 8px 10px; }
+  select, textarea, button { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); padding: 8px 10px; outline: none; }
+  select:focus, textarea:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
+  button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+  summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 10px; }
   select, textarea { width: 100%; min-width: 0; }
   select { text-overflow: ellipsis; }
   textarea { resize: vertical; min-height: 54px; max-height: 140px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; line-height: 1.35; }
@@ -1205,25 +1208,40 @@ async function mcpWorkbenchHtml() {
   .graph-scroll { max-height: max(260px, min(560px, calc(100vh - 310px))); min-height: 240px; overflow: auto; }
   .graph { position: relative; }
   .node { position: absolute; width: 250px; min-height: 118px; display: grid; gap: 5px; text-align: left; border-radius: 12px; overflow: hidden; }
-  .node.selected { outline: 2px solid var(--accent); }
+  .node.selected { outline: 2px solid var(--focus-ring); }
+  .node:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
   .node-kicker, .node-agent, small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .node strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .inspector { padding: 14px; overflow: auto; max-height: max(320px, min(640px, calc(100vh - 260px))); }
   .inspector pre { max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; }
   .subtle, .empty { color: var(--muted); }
+  .compact-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .compact-header h1 { font-size: 16px; margin: 0; }
+  .compact-header p { font-size: 11px; }
+  .workflow-identity { min-width: 0; }
+  .workflow-identity select { width: 100%; }
+  .preview-input-panel, .inspector-panel { border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 70%, transparent); overflow: hidden; }
+  .preview-input-panel summary, .inspector-panel summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; cursor: pointer; padding: 10px 12px; color: var(--text); font-size: 13px; list-style: none; }
+  .preview-input-panel summary::-webkit-details-marker, .inspector-panel summary::-webkit-details-marker { display: none; }
+  .preview-input-panel summary span, .inspector-panel summary span { font-weight: 600; }
+  .preview-input-panel summary small, .inspector-panel summary small { font-size: 11px; }
+  .preview-input-panel[open] summary, .inspector-panel[open] summary { border-bottom: 1px solid var(--border); }
+  .preview-input-body { padding: 10px 12px; }
+  .inspector-summary { font-weight: 600; font-size: 14px; }
   body[data-display-mode="inline"] .shell { gap: 10px; padding: 12px; }
   body[data-display-mode="inline"] header { padding-bottom: 10px; }
   body[data-display-mode="inline"] h1 { font-size: 18px; }
   body[data-display-mode="inline"] .toolbar,
   body[data-display-mode="inline"] .creator,
+  body[data-display-mode="inline"] .preview-input-body,
   body[data-display-mode="inline"] .workspace { grid-template-columns: 1fr; }
   body[data-display-mode="inline"] .creator-panel summary { grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 3px 10px; }
   body[data-display-mode="inline"] .creator-panel summary small { grid-column: 2; }
   body[data-display-mode="inline"] .action-cell { display: flex; align-items: center; gap: 10px; }
-  body[data-display-mode="inline"] .workspace { overflow: visible; }
-  body[data-display-mode="inline"] .graph-scroll { max-height: 360px; min-height: 220px; }
-  body[data-display-mode="inline"] .inspector { min-height: 180px; max-height: 320px; }
-  body[data-display-mode="fullscreen"] .shell { height: 100vh; min-height: 100vh; grid-template-rows: auto auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; padding: 18px; gap: 14px; }
+  body[data-display-mode="inline"] .workspace { overflow: visible; grid-template-columns: 1fr; }
+  body[data-display-mode="inline"] .graph-scroll { max-height: 420px; min-height: 220px; }
+  body[data-display-mode="inline"] .inspector { min-height: 0; max-height: 320px; border: none; border-radius: 0; background: transparent; padding: 12px 0 0; }
+  body[data-display-mode="fullscreen"] .shell { height: 100vh; min-height: 100vh; grid-template-rows: auto auto minmax(0, 1fr) auto; align-content: stretch; overflow: hidden; padding: 18px; gap: 14px; }
   body[data-display-mode="fullscreen"] .workspace { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); }
   @media (max-width: 860px) { .toolbar, .creator, .workspace { grid-template-columns: 1fr; } .action-cell { display: flex; align-items: center; gap: 10px; } .workspace { overflow: visible; } .graph-scroll { max-height: 420px; } }
 </style>

@@ -141,6 +141,8 @@ function setStatus(message: string, kind: "ok" | "error" | "muted" = "muted") {
   if (!el) return;
   el.textContent = message;
   el.className = `status ${kind}`;
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
 }
 
 async function refreshWorkflows() {
@@ -165,7 +167,7 @@ async function renderSelectedGraph() {
     (document.getElementById("prompt") as HTMLTextAreaElement | null)?.value ??
     "";
   setBusyAction("render", true);
-  setStatus("Rendering workflow graph…");
+  setStatus("Rendering…");
   try {
     const result = await app.callServerTool({
       name: "ch_workflow_graph_render",
@@ -195,7 +197,7 @@ async function renderSelectedGraph() {
     graph = data.graph;
     selectedNodeId = graph.defaultSelected || graph.nodes?.[0]?.id || "";
     render();
-    setStatus(`Rendered ${selectedWorkflowId}`, "ok");
+    setStatus("Preview updated", "ok");
     void syncModelContext();
   } finally {
     setBusyAction("render", false);
@@ -212,7 +214,7 @@ async function createWorkflowFromPrompt() {
     return;
   }
   setBusyAction("create", true);
-  setStatus("Generating Smithers Workflow Source…");
+  setStatus("Generating workflow…");
   try {
     const result = await app.callServerTool({
       name: "ch_workflow_create_from_prompt",
@@ -291,39 +293,37 @@ function renderGraph() {
     .join("")}</div></div>`;
 }
 
-function renderInspector() {
+function renderInspector(compact = false) {
   const node = nodeById(selectedNodeId);
   if (!node)
     return `<aside class="inspector"><div class="empty">Select a node.</div></aside>`;
   const meta = node.smithers?.meta
     ? JSON.stringify(node.smithers.meta, null, 2)
     : "";
-  return `<aside class="inspector">
+  const body = `
     <div class="eyebrow">${escapeHtml(node.type || "node")} · ${escapeHtml(node.status || "unknown")}</div>
     <h2>${escapeHtml(node.title || node.id)}</h2>
     <p class="subtle">id ${escapeHtml(node.id)} · ${escapeHtml(node.agent || "no agent")}</p>
     <label>Rendered prompt</label>
     <pre>${escapeHtml(node.prompt || "No prompt captured for this node.")}</pre>
-    ${meta ? `<label>Editor metadata</label><pre>${escapeHtml(meta)}</pre>` : ""}
-  </aside>`;
+    ${meta ? `<label>Editor metadata</label><pre>${escapeHtml(meta)}</pre>` : ""}`;
+  if (compact) {
+    return `<details class="inspector-panel" open>
+      <summary class="inspector-summary">${escapeHtml(node.title || node.id)} <small class="subtle">${escapeHtml(node.type || "node")} · ${escapeHtml(node.status || "idle")}</small></summary>
+      <aside class="inspector">${body}</aside>
+    </details>`;
+  }
+  return `<aside class="inspector">${body}</aside>`;
 }
 
-function render() {
-  const projectRoot = bootstrap.project?.projectRoot || "No project";
-  const title = bootstrap.launch?.title || "Smithers workflow workbench";
-  const subtitle = bootstrap.launch?.subtitle || projectRoot;
-  root.innerHTML = `<main class="shell">
-    <header>
-      <div>
-        <div class="eyebrow">CustomHarness MCP App</div>
-        <h1>${escapeHtml(title)}</h1>
-        <p>${escapeHtml(subtitle)}</p>
-      </div>
-      <button id="fullscreen" class="ghost" type="button">Fullscreen</button>
-    </header>
-    <section class="toolbar run-toolbar">
-      <label class="workflow-field">Workflow ${renderWorkflowPicker()}</label>
-      <label class="prompt-label">Runtime input
+function renderPreviewInput() {
+  const hasCustomPrompt =
+    graph?.goal &&
+    graph.goal !== "Describe what this workflow should do for this run.";
+  return `<details class="preview-input-panel"${hasCustomPrompt ? " open" : ""}>
+    <summary><span>Preview with input</span><small>Renders the graph preview. Does not run the workflow.</small></summary>
+    <section class="toolbar preview-input-body">
+      <label class="prompt-label">Preview input
         <textarea id="prompt" rows="3" spellcheck="false">${escapeHtml(graph?.goal || "Describe what this workflow should do for this run.")}</textarea>
       </label>
       <div class="action-cell">
@@ -331,26 +331,86 @@ function render() {
         <span id="status" class="status muted">Ready</span>
       </div>
     </section>
-    <details class="creator-panel">
-      <summary><span>New workflow from natural language</span><small>Generate ordinary .smithers/workflows/*.tsx</small></summary>
-      <section class="toolbar creator">
-        <label class="create-field">Describe the workflow
-          <textarea id="create-prompt" rows="3" spellcheck="true" placeholder="Example: Review a pull request, fan out to security and UX reviewers, then synthesize risks."></textarea>
-        </label>
-        <div class="action-cell">
-          <button id="create-workflow" type="button">Generate workflow</button>
-          <span class="status muted">Creates source, then renders the graph</span>
-        </div>
-      </section>
-    </details>
-    <section class="workspace">
-      <div class="canvas">
-        <div class="canvas-title">${escapeHtml(graph?.title || selectedWorkflowId || "Workflow graph")}</div>
-        ${renderGraph()}
+  </details>`;
+}
+
+function renderCreatorPanel() {
+  return `<details class="creator-panel">
+    <summary><span>New workflow from natural language</span><small>Generate ordinary .smithers/workflows/*.tsx</small></summary>
+    <section class="toolbar creator">
+      <label class="create-field">Describe the workflow
+        <textarea id="create-prompt" rows="3" spellcheck="true" placeholder="Example: Review a pull request, fan out to security and UX reviewers, then synthesize risks."></textarea>
+      </label>
+      <div class="action-cell">
+        <button id="create-workflow" type="button">Generate workflow</button>
+        <span class="status muted">Creates source, then renders the graph</span>
       </div>
-      ${renderInspector()}
     </section>
-  </main>`;
+  </details>`;
+}
+
+function renderFullscreenToolbar() {
+  return `<section class="toolbar run-toolbar">
+    <label class="workflow-field">Workflow ${renderWorkflowPicker()}</label>
+    <label class="prompt-label">Preview input
+      <textarea id="prompt" rows="3" spellcheck="false">${escapeHtml(graph?.goal || "Describe what this workflow should do for this run.")}</textarea>
+    </label>
+    <div class="action-cell">
+      <button id="render" type="button">Render graph</button>
+      <span id="status" class="status muted">Ready</span>
+    </div>
+  </section>`;
+}
+
+function render() {
+  const projectRoot = bootstrap.project?.projectRoot || "No project";
+  const title = bootstrap.launch?.title || "Smithers workflow workbench";
+  const subtitle = bootstrap.launch?.subtitle || projectRoot;
+  const isInline = currentDisplayMode() === "inline";
+
+  const headerHtml = isInline
+    ? `<header class="compact-header">
+        <div>
+          <h1>${escapeHtml(title)}</h1>
+          <p>${escapeHtml(subtitle)}</p>
+        </div>
+        <button id="fullscreen" class="ghost" type="button">Fullscreen</button>
+      </header>
+      <div class="workflow-identity">
+        ${renderWorkflowPicker()}
+      </div>`
+    : `<header>
+        <div>
+          <div class="eyebrow">CustomHarness MCP App</div>
+          <h1>${escapeHtml(title)}</h1>
+          <p>${escapeHtml(subtitle)}</p>
+        </div>
+        <button id="fullscreen" class="ghost" type="button">Fullscreen</button>
+      </header>`;
+
+  const workspaceHtml = `<section class="workspace">
+    <div class="canvas">
+      <div class="canvas-title">${escapeHtml(graph?.title || selectedWorkflowId || "Workflow graph")}</div>
+      ${renderGraph()}
+    </div>
+    ${renderInspector(!isInline ? false : true)}
+  </section>`;
+
+  if (isInline) {
+    root.innerHTML = `<main class="shell">
+      ${headerHtml}
+      ${workspaceHtml}
+      ${renderPreviewInput()}
+      ${renderCreatorPanel()}
+    </main>`;
+  } else {
+    root.innerHTML = `<main class="shell">
+      ${headerHtml}
+      ${renderFullscreenToolbar()}
+      ${workspaceHtml}
+      ${renderCreatorPanel()}
+    </main>`;
+  }
   attachEvents();
   applyHostChrome();
 }
@@ -523,8 +583,14 @@ app.ontoolresult = async (result) => {
 };
 
 app.onhostcontextchanged = (ctx) => {
+  const previousMode = currentDisplayMode();
   hostContext = { ...hostContext, ...ctx };
-  applyHostChrome();
+  const newMode = currentDisplayMode();
+  if (previousMode !== newMode) {
+    render();
+  } else {
+    applyHostChrome();
+  }
 };
 
 app.onteardown = async () => {
