@@ -73,6 +73,9 @@ let hostContext: McpUiHostContext | undefined;
 let busyAction: "render" | "create" | "display-mode" | null = null;
 let zoomLevel = 1;
 let fitZoom: number | null = null;
+let bootstrapReceived = false;
+let connectResolved = false;
+let pendingBootstrapResolve: (() => void) | null = null;
 
 const root = document.getElementById("root")!;
 
@@ -637,6 +640,11 @@ app.ontoolresult = async (result) => {
     graph?.defaultSelected ||
     graph?.nodes?.[0]?.id ||
     "";
+  bootstrapReceived = true;
+  if (pendingBootstrapResolve) {
+    pendingBootstrapResolve();
+    pendingBootstrapResolve = null;
+  }
   render();
   if (bootstrap.ok === false) {
     const message =
@@ -678,18 +686,36 @@ app.onerror = (error) => {
 async function main() {
   root.innerHTML = `<div class="loading">Connecting to MCP host…</div>`;
   await app.connect();
+  connectResolved = true;
   hostContext = app.getHostContext();
+
+  // Wait briefly for bootstrap tool result if it hasn't arrived yet.
+  // The host calls open_workflow_workbench which delivers workflows + graph
+  // via ontoolresult, but that fires asynchronously after connect() resolves.
+  if (!bootstrapReceived) {
+    await Promise.race([
+      new Promise<void>((resolve) => { pendingBootstrapResolve = resolve; }),
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  }
+
+  // If bootstrap already populated workflows, skip the redundant fetch.
   if (!workflows.length) {
     await refreshWorkflows().catch((error) =>
       setStatus(error.message, "error")
     );
   }
-  render();
+
+  // Only render if ontoolresult hasn't already done so.
+  if (!bootstrapReceived) {
+    render();
+  }
+
   if (!graph && selectedWorkflowId) {
     await renderSelectedGraph().catch((error) =>
       setStatus(error.message, "error")
     );
-  } else {
+  } else if (!bootstrapReceived) {
     void syncModelContext();
   }
 }
