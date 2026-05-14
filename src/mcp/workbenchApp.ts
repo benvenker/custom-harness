@@ -71,6 +71,8 @@ let selectedNodeId = "";
 let graph: RenderGraph | null = null;
 let hostContext: McpUiHostContext | undefined;
 let busyAction: "render" | "create" | "display-mode" | null = null;
+let zoomLevel = 1;
+let fitZoom: number | null = null;
 
 const root = document.getElementById("root")!;
 
@@ -259,9 +261,9 @@ function renderWorkflowPicker() {
     .join("")}</select>`;
 }
 
-function renderGraph() {
+function graphDimensions() {
   const nodes = graph?.nodes ?? [];
-  if (!nodes.length) return `<div class="empty">No graph rendered yet.</div>`;
+  if (!nodes.length) return null;
   const nodeWidth = 250;
   const nodeHeight = 118;
   const padding = 24;
@@ -272,15 +274,24 @@ function renderGraph() {
     x: Number(node.x ?? 0) - minX + padding,
     y: Number(node.y ?? 0) - minY + padding,
   }));
-  const graphWidth = Math.max(
-    360,
-    ...positionedNodes.map(({ x }) => x + nodeWidth + padding)
-  );
-  const graphHeight = Math.max(
-    220,
-    ...positionedNodes.map(({ y }) => y + nodeHeight + padding)
-  );
-  return `<div class="graph-scroll"><div class="graph" style="min-width:${graphWidth}px;min-height:${graphHeight}px">${positionedNodes
+  const width = Math.max(360, ...positionedNodes.map(({ x }) => x + nodeWidth + padding));
+  const height = Math.max(220, ...positionedNodes.map(({ y }) => y + nodeHeight + padding));
+  return { positionedNodes, width, height, nodeWidth, nodeHeight, padding };
+}
+
+function renderGraph() {
+  const dims = graphDimensions();
+  if (!dims) return `<div class="empty">No graph rendered yet.</div>`;
+  const { positionedNodes, width, height } = dims;
+  const zoomPct = Math.round(zoomLevel * 100);
+  return `<div class="graph-toolbar">
+    <button type="button" class="zoom-btn" id="zoom-fit" title="Fit to view">Fit</button>
+    <button type="button" class="zoom-btn" id="zoom-out" title="Zoom out">−</button>
+    <span class="zoom-label">${zoomPct}%</span>
+    <button type="button" class="zoom-btn" id="zoom-in" title="Zoom in">+</button>
+    <button type="button" class="zoom-btn" id="zoom-reset" title="Reset to 100%">1:1</button>
+  </div>
+  <div class="graph-scroll" id="graph-scroll"><div class="graph" id="graph-canvas" style="min-width:${width}px;min-height:${height}px;transform:scale(${zoomLevel});transform-origin:0 0">${positionedNodes
     .map(({ node, x, y }) => {
       const selected = node.id === selectedNodeId ? " selected" : "";
       return `<button class="node${selected}" style="left:${x}px;top:${y}px" data-node-id="${escapeHtml(node.id)}">
@@ -291,6 +302,36 @@ function renderGraph() {
       </button>`;
     })
     .join("")}</div></div>`;
+}
+
+function applyZoom(newZoom: number, rerender = true) {
+  zoomLevel = Math.max(0.15, Math.min(2, newZoom));
+  if (rerender) {
+    const graphEl = document.getElementById("graph-canvas");
+    const label = document.querySelector(".zoom-label");
+    if (graphEl) {
+      graphEl.style.transform = `scale(${zoomLevel})`;
+      const scrollEl = document.getElementById("graph-scroll");
+      if (scrollEl) {
+        const dims = graphDimensions();
+        if (dims) {
+          scrollEl.style.height = `${dims.height * zoomLevel}px`;
+        }
+      }
+    }
+    if (label) label.textContent = `${Math.round(zoomLevel * 100)}%`;
+  }
+}
+
+function computeFitZoom(): number {
+  const scrollEl = document.getElementById("graph-scroll");
+  const dims = graphDimensions();
+  if (!scrollEl || !dims) return 1;
+  const containerWidth = scrollEl.clientWidth;
+  const containerHeight = scrollEl.clientHeight || 400;
+  const scaleX = containerWidth / dims.width;
+  const scaleY = containerHeight / dims.height;
+  return Math.max(0.15, Math.min(1, Math.min(scaleX, scaleY) * 0.95));
 }
 
 function renderInspector(compact = false) {
@@ -459,6 +500,37 @@ function attachEvents() {
       void syncModelContext();
     });
   });
+
+  // Zoom controls
+  document.getElementById("zoom-in")?.addEventListener("click", () => applyZoom(zoomLevel + 0.15));
+  document.getElementById("zoom-out")?.addEventListener("click", () => applyZoom(zoomLevel - 0.15));
+  document.getElementById("zoom-reset")?.addEventListener("click", () => applyZoom(1));
+  document.getElementById("zoom-fit")?.addEventListener("click", () => {
+    fitZoom = computeFitZoom();
+    applyZoom(fitZoom);
+  });
+
+  // Wheel zoom (Ctrl+scroll or pinch)
+  const scrollEl = document.getElementById("graph-scroll");
+  scrollEl?.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.08 : 0.08;
+      applyZoom(zoomLevel + delta);
+    }
+  }, { passive: false });
+
+  // Auto-fit on first render when graph overflows
+  if (scrollEl && graphDimensions()) {
+    const dims = graphDimensions()!;
+    if (dims.height > scrollEl.clientHeight || dims.width > scrollEl.clientWidth) {
+      requestAnimationFrame(() => {
+        fitZoom = computeFitZoom();
+        applyZoom(fitZoom);
+      });
+    }
+  }
+
   updateDisplayModeControl();
   updateBusyControls();
 }

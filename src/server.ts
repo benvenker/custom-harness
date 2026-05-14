@@ -1203,10 +1203,14 @@ async function mcpWorkbenchHtml() {
   .status.ok { color: var(--ok); }
   .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 28vw); gap: 12px; align-items: start; overflow: visible; }
   .canvas, .inspector { min-height: 0; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, transparent); overflow: hidden; }
-  .canvas { display: grid; grid-template-rows: auto auto; }
+  .canvas { display: grid; grid-template-rows: auto auto auto; }
   .canvas-title { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .graph-toolbar { display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+  .zoom-btn { padding: 3px 8px; font-size: 12px; min-height: 24px; border-radius: 6px; background: var(--bg); line-height: 1; }
+  .zoom-btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); }
+  .zoom-label { font-size: 11px; color: var(--muted); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
   .graph-scroll { max-height: max(260px, min(560px, calc(100vh - 310px))); min-height: 240px; overflow: auto; }
-  .graph { position: relative; }
+  .graph { position: relative; will-change: transform; }
   .node { position: absolute; width: 250px; min-height: 118px; display: grid; gap: 5px; text-align: left; border-radius: 12px; overflow: hidden; }
   .node.selected { outline: 2px solid var(--focus-ring); }
   .node:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
