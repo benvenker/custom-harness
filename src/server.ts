@@ -1161,39 +1161,71 @@ async function mcpWorkbenchHtml() {
 <style>
   :root { color-scheme: light dark; --bg: var(--color-background-primary, #101010); --panel: var(--color-background-secondary, #181818); --text: var(--color-text-primary, #f4f4f4); --muted: var(--color-text-secondary, #a2a2a2); --border: var(--color-border-primary, #333); --accent: var(--color-accent-primary, #8ab4ff); --danger: #ff6b6b; --ok: #63d297; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); }
+  html, body, #root { width: 100%; height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
   button, select, textarea { font: inherit; }
   .loading { padding: 20px; color: var(--muted); }
   .loading.error, .status.error { color: var(--danger); }
-  .shell { min-height: 100vh; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+  .shell { min-height: 100vh; display: grid; grid-template-rows: auto auto auto auto; align-content: start; gap: 12px; padding: 14px; overflow: visible; }
   header { display: flex; justify-content: space-between; gap: 16px; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
   h1 { margin: 2px 0 4px; font-size: 20px; line-height: 1.1; }
   h2 { margin: 4px 0 8px; font-size: 18px; }
   p { margin: 0; color: var(--muted); font-size: 12px; }
   .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
-  .toolbar { display: grid; grid-template-columns: minmax(160px, 220px) minmax(260px, 1fr) auto minmax(120px, auto); gap: 10px; align-items: end; }
-  .creator { grid-template-columns: minmax(260px, 1fr) auto minmax(120px, auto); }
-  label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+  .toolbar { display: grid; grid-template-columns: minmax(260px, 330px) minmax(320px, 1fr) minmax(156px, auto); gap: 10px; align-items: end; min-width: 0; }
+  .creator { grid-template-columns: minmax(0, 1fr) minmax(220px, auto); padding-top: 10px; }
+  .creator-panel { border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 70%, transparent); overflow: hidden; }
+  .creator-panel summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 12px; cursor: pointer; padding: 10px 12px; color: var(--text); font-size: 13px; list-style: none; }
+  .creator-panel summary::-webkit-details-marker { display: none; }
+  .creator-panel summary::before { content: "+"; display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); }
+  .creator-panel:not([open]) > .creator { display: none; }
+  .creator-panel[open] summary { border-bottom: 1px solid var(--border); }
+  .creator-panel[open] summary::before { content: "–"; color: var(--accent); }
+  .creator-panel summary span { font-weight: 650; }
+  .creator-panel summary small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; min-width: 0; }
+  .workflow-field { min-width: 260px; }
+  .create-field { min-width: 0; }
   select, textarea, button { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); padding: 8px 10px; }
-  textarea { resize: vertical; min-height: 54px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; }
-  button { cursor: pointer; }
-  button:hover { border-color: var(--accent); }
+  select, textarea { width: 100%; min-width: 0; }
+  select { text-overflow: ellipsis; }
+  textarea { resize: vertical; min-height: 54px; max-height: 140px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; line-height: 1.35; }
+  button { cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { cursor: progress; opacity: .62; }
   button.ghost { background: transparent; }
-  .status { align-self: center; font-size: 12px; color: var(--muted); }
+  .action-cell { display: grid; gap: 6px; justify-items: start; align-content: end; min-width: 0; }
+  .action-cell .status { max-width: 240px; }
+  .status { align-self: center; font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status.ok { color: var(--ok); }
-  .workspace { min-height: 620px; display: grid; grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px); gap: 12px; }
-  .canvas, .inspector { border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, transparent); overflow: hidden; }
-  .canvas-title { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-  .graph { position: relative; min-height: 560px; overflow: auto; }
-  .node { position: absolute; width: 250px; min-height: 118px; display: grid; gap: 5px; text-align: left; border-radius: 12px; }
+  .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 28vw); gap: 12px; align-items: start; overflow: visible; }
+  .canvas, .inspector { min-height: 0; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, transparent); overflow: hidden; }
+  .canvas { display: grid; grid-template-rows: auto auto; }
+  .canvas-title { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .graph-scroll { max-height: max(260px, min(560px, calc(100vh - 310px))); min-height: 240px; overflow: auto; }
+  .graph { position: relative; }
+  .node { position: absolute; width: 250px; min-height: 118px; display: grid; gap: 5px; text-align: left; border-radius: 12px; overflow: hidden; }
   .node.selected { outline: 2px solid var(--accent); }
-  .node-kicker, small { color: var(--muted); font-size: 11px; }
-  .node strong { font-size: 16px; }
-  .inspector { padding: 14px; overflow: auto; }
+  .node-kicker, .node-agent, small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .inspector { padding: 14px; overflow: auto; max-height: max(320px, min(640px, calc(100vh - 260px))); }
   .inspector pre { max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); font-size: 12px; }
   .subtle, .empty { color: var(--muted); }
-  body[data-display-mode="fullscreen"] .workspace { min-height: calc(100vh - 180px); }
-  @media (max-width: 860px) { .toolbar, .workspace { grid-template-columns: 1fr; } .graph { min-height: 520px; } }
+  body[data-display-mode="inline"] .shell { gap: 10px; padding: 12px; }
+  body[data-display-mode="inline"] header { padding-bottom: 10px; }
+  body[data-display-mode="inline"] h1 { font-size: 18px; }
+  body[data-display-mode="inline"] .toolbar,
+  body[data-display-mode="inline"] .creator,
+  body[data-display-mode="inline"] .workspace { grid-template-columns: 1fr; }
+  body[data-display-mode="inline"] .creator-panel summary { grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 3px 10px; }
+  body[data-display-mode="inline"] .creator-panel summary small { grid-column: 2; }
+  body[data-display-mode="inline"] .action-cell { display: flex; align-items: center; gap: 10px; }
+  body[data-display-mode="inline"] .workspace { overflow: visible; }
+  body[data-display-mode="inline"] .graph-scroll { max-height: 360px; min-height: 220px; }
+  body[data-display-mode="inline"] .inspector { min-height: 180px; max-height: 320px; }
+  body[data-display-mode="fullscreen"] .shell { height: 100vh; min-height: 100vh; grid-template-rows: auto auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; padding: 18px; gap: 14px; }
+  body[data-display-mode="fullscreen"] .workspace { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); }
+  @media (max-width: 860px) { .toolbar, .creator, .workspace { grid-template-columns: 1fr; } .action-cell { display: flex; align-items: center; gap: 10px; } .workspace { overflow: visible; } .graph-scroll { max-height: 420px; } }
 </style>
 </head>
 <body><div id="root"></div><script type="module">${script}</script></body>

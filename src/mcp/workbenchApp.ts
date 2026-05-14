@@ -70,6 +70,7 @@ let selectedWorkflowId = "";
 let selectedNodeId = "";
 let graph: RenderGraph | null = null;
 let hostContext: McpUiHostContext | undefined;
+let busyAction: "render" | "create" | "display-mode" | null = null;
 
 const root = document.getElementById("root")!;
 
@@ -163,37 +164,42 @@ async function renderSelectedGraph() {
   const prompt =
     (document.getElementById("prompt") as HTMLTextAreaElement | null)?.value ??
     "";
+  setBusyAction("render", true);
   setStatus("Rendering workflow graph…");
-  const result = await app.callServerTool({
-    name: "ch_workflow_graph_render",
-    arguments: {
-      workflowId: selectedWorkflowId,
-      input: {
-        prompt,
-        request: prompt,
-        plan: prompt,
-        idea: prompt,
-        text: prompt,
+  try {
+    const result = await app.callServerTool({
+      name: "ch_workflow_graph_render",
+      arguments: {
+        workflowId: selectedWorkflowId,
+        input: {
+          prompt,
+          request: prompt,
+          plan: prompt,
+          idea: prompt,
+          text: prompt,
+        },
       },
-    },
-  });
-  const data = toolStructured<{
-    ok: boolean;
-    workflowId: string;
-    graph: RenderGraph;
-    error?: string | { message?: string };
-  }>(result);
-  if (!data.ok)
-    throw new Error(
-      typeof data.error === "string"
-        ? data.error
-        : data.error?.message || "Render failed"
-    );
-  graph = data.graph;
-  selectedNodeId = graph.defaultSelected || graph.nodes?.[0]?.id || "";
-  render();
-  setStatus(`Rendered ${selectedWorkflowId}`, "ok");
-  void syncModelContext();
+    });
+    const data = toolStructured<{
+      ok: boolean;
+      workflowId: string;
+      graph: RenderGraph;
+      error?: string | { message?: string };
+    }>(result);
+    if (!data.ok)
+      throw new Error(
+        typeof data.error === "string"
+          ? data.error
+          : data.error?.message || "Render failed"
+      );
+    graph = data.graph;
+    selectedNodeId = graph.defaultSelected || graph.nodes?.[0]?.id || "";
+    render();
+    setStatus(`Rendered ${selectedWorkflowId}`, "ok");
+    void syncModelContext();
+  } finally {
+    setBusyAction("render", false);
+  }
 }
 
 async function createWorkflowFromPrompt() {
@@ -205,36 +211,41 @@ async function createWorkflowFromPrompt() {
     setStatus("Describe the workflow to create first", "error");
     return;
   }
+  setBusyAction("create", true);
   setStatus("Generating Smithers Workflow Source…");
-  const result = await app.callServerTool({
-    name: "ch_workflow_create_from_prompt",
-    arguments: { prompt },
-  });
-  const data = toolStructured<{
-    ok: boolean;
-    workflowId?: string;
-    graph?: RenderGraph;
-    verified?: boolean;
-    error?: string;
-    verificationError?: string;
-  }>(result);
-  if (!data.ok || !data.workflowId)
-    throw new Error(data.error || "Workflow generation failed");
-  await refreshWorkflows();
-  selectedWorkflowId = data.workflowId;
-  graph = data.graph ?? null;
-  selectedNodeId = graph?.defaultSelected || graph?.nodes?.[0]?.id || "";
-  render();
-  if (!graph) {
-    await renderSelectedGraph();
+  try {
+    const result = await app.callServerTool({
+      name: "ch_workflow_create_from_prompt",
+      arguments: { prompt },
+    });
+    const data = toolStructured<{
+      ok: boolean;
+      workflowId?: string;
+      graph?: RenderGraph;
+      verified?: boolean;
+      error?: string;
+      verificationError?: string;
+    }>(result);
+    if (!data.ok || !data.workflowId)
+      throw new Error(data.error || "Workflow generation failed");
+    await refreshWorkflows();
+    selectedWorkflowId = data.workflowId;
+    graph = data.graph ?? null;
+    selectedNodeId = graph?.defaultSelected || graph?.nodes?.[0]?.id || "";
+    render();
+    if (!graph) {
+      await renderSelectedGraph();
+    }
+    setStatus(
+      data.verified
+        ? `Created and rendered ${selectedWorkflowId}`
+        : `Created ${selectedWorkflowId}; verification needs repair`,
+      data.verified ? "ok" : "error"
+    );
+    void syncModelContext();
+  } finally {
+    setBusyAction("create", false);
   }
-  setStatus(
-    data.verified
-      ? `Created and rendered ${selectedWorkflowId}`
-      : `Created ${selectedWorkflowId}; verification needs repair`,
-    data.verified ? "ok" : "error"
-  );
-  void syncModelContext();
 }
 
 function renderWorkflowPicker() {
@@ -249,21 +260,35 @@ function renderWorkflowPicker() {
 function renderGraph() {
   const nodes = graph?.nodes ?? [];
   if (!nodes.length) return `<div class="empty">No graph rendered yet.</div>`;
+  const nodeWidth = 250;
+  const nodeHeight = 118;
+  const padding = 24;
   const minX = Math.min(...nodes.map((n) => Number(n.x ?? 0)));
   const minY = Math.min(...nodes.map((n) => Number(n.y ?? 0)));
-  return `<div class="graph">${nodes
-    .map((node) => {
-      const x = Number(node.x ?? 0) - minX + 24;
-      const y = Number(node.y ?? 0) - minY + 24;
+  const positionedNodes = nodes.map((node) => ({
+    node,
+    x: Number(node.x ?? 0) - minX + padding,
+    y: Number(node.y ?? 0) - minY + padding,
+  }));
+  const graphWidth = Math.max(
+    360,
+    ...positionedNodes.map(({ x }) => x + nodeWidth + padding)
+  );
+  const graphHeight = Math.max(
+    220,
+    ...positionedNodes.map(({ y }) => y + nodeHeight + padding)
+  );
+  return `<div class="graph-scroll"><div class="graph" style="min-width:${graphWidth}px;min-height:${graphHeight}px">${positionedNodes
+    .map(({ node, x, y }) => {
       const selected = node.id === selectedNodeId ? " selected" : "";
       return `<button class="node${selected}" style="left:${x}px;top:${y}px" data-node-id="${escapeHtml(node.id)}">
         <span class="node-kicker">${escapeHtml(node.type || "task")} · ${escapeHtml(node.status || "idle")}</span>
         <strong>${escapeHtml(node.title || node.id)}</strong>
-        <span>${escapeHtml(node.agent || "")}</span>
+        <span class="node-agent">${escapeHtml(node.agent || "")}</span>
         <small>${escapeHtml((node.prompt || "").slice(0, 150))}</small>
       </button>`;
     })
-    .join("")}</div>`;
+    .join("")}</div></div>`;
 }
 
 function renderInspector() {
@@ -294,23 +319,30 @@ function render() {
         <h1>${escapeHtml(title)}</h1>
         <p>${escapeHtml(subtitle)}</p>
       </div>
-      <button id="fullscreen" class="ghost">Fullscreen</button>
+      <button id="fullscreen" class="ghost" type="button">Fullscreen</button>
     </header>
-    <section class="toolbar">
-      <label>Workflow ${renderWorkflowPicker()}</label>
+    <section class="toolbar run-toolbar">
+      <label class="workflow-field">Workflow ${renderWorkflowPicker()}</label>
       <label class="prompt-label">Runtime input
         <textarea id="prompt" rows="3" spellcheck="false">${escapeHtml(graph?.goal || "Describe what this workflow should do for this run.")}</textarea>
       </label>
-      <button id="render">Render graph</button>
-      <span id="status" class="status muted">Ready</span>
+      <div class="action-cell">
+        <button id="render" type="button">Render graph</button>
+        <span id="status" class="status muted">Ready</span>
+      </div>
     </section>
-    <section class="toolbar creator">
-      <label>New workflow from natural language
-        <textarea id="create-prompt" rows="3" spellcheck="true" placeholder="Example: Review a pull request, fan out to security and UX reviewers, then synthesize risks."></textarea>
-      </label>
-      <button id="create-workflow">Generate workflow</button>
-      <span class="status muted">Writes ordinary .smithers/workflows/*.tsx</span>
-    </section>
+    <details class="creator-panel">
+      <summary><span>New workflow from natural language</span><small>Generate ordinary .smithers/workflows/*.tsx</small></summary>
+      <section class="toolbar creator">
+        <label class="create-field">Describe the workflow
+          <textarea id="create-prompt" rows="3" spellcheck="true" placeholder="Example: Review a pull request, fan out to security and UX reviewers, then synthesize risks."></textarea>
+        </label>
+        <div class="action-cell">
+          <button id="create-workflow" type="button">Generate workflow</button>
+          <span class="status muted">Creates source, then renders the graph</span>
+        </div>
+      </section>
+    </details>
     <section class="workspace">
       <div class="canvas">
         <div class="canvas-title">${escapeHtml(graph?.title || selectedWorkflowId || "Workflow graph")}</div>
@@ -344,11 +376,21 @@ function attachEvents() {
   document.getElementById("fullscreen")?.addEventListener("click", async () => {
     const mode =
       hostContext?.displayMode === "fullscreen" ? "inline" : "fullscreen";
-    if (!hostContext?.availableDisplayModes?.includes(mode)) {
-      setStatus("Host does not offer that display mode", "error");
+    if (!canRequestDisplayMode(mode)) {
+      setStatus(`${mode} display mode is not available in this host`, "error");
       return;
     }
-    await app.requestDisplayMode({ mode });
+    setBusyAction("display-mode", true);
+    try {
+      await app.requestDisplayMode({ mode });
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : String(error),
+        "error"
+      );
+    } finally {
+      setBusyAction("display-mode", false);
+    }
   });
   document.querySelectorAll<HTMLElement>(".node").forEach((el) => {
     el.addEventListener("click", () => {
@@ -357,10 +399,71 @@ function attachEvents() {
       void syncModelContext();
     });
   });
+  updateDisplayModeControl();
+  updateBusyControls();
+}
+
+function currentDisplayMode() {
+  return hostContext?.displayMode || "inline";
+}
+
+function canRequestDisplayMode(mode: string) {
+  const modes = hostContext?.availableDisplayModes;
+  if (!modes || modes.length === 0)
+    return mode === "inline" || mode === "fullscreen";
+  return (modes as readonly string[]).includes(mode);
+}
+
+function setBusyAction(action: typeof busyAction, isBusy: boolean) {
+  busyAction = isBusy ? action : busyAction === action ? null : busyAction;
+  updateBusyControls();
+}
+
+function updateBusyControls() {
+  const renderButton = document.getElementById(
+    "render"
+  ) as HTMLButtonElement | null;
+  const createButton = document.getElementById(
+    "create-workflow"
+  ) as HTMLButtonElement | null;
+  const fullscreenButton = document.getElementById(
+    "fullscreen"
+  ) as HTMLButtonElement | null;
+  if (renderButton) {
+    renderButton.disabled = busyAction !== null;
+    renderButton.textContent =
+      busyAction === "render" ? "Rendering…" : "Render graph";
+  }
+  if (createButton) {
+    createButton.disabled = busyAction !== null;
+    createButton.textContent =
+      busyAction === "create" ? "Generating…" : "Generate workflow";
+  }
+  if (fullscreenButton) {
+    fullscreenButton.disabled = busyAction !== null;
+  }
+}
+
+function updateDisplayModeControl() {
+  const button = document.getElementById(
+    "fullscreen"
+  ) as HTMLButtonElement | null;
+  if (!button) return;
+  const displayMode = currentDisplayMode();
+  const targetMode = displayMode === "fullscreen" ? "inline" : "fullscreen";
+  const canToggle = canRequestDisplayMode(targetMode);
+  button.hidden = !canToggle;
+  button.textContent =
+    displayMode === "fullscreen" ? "Inline view" : "Fullscreen";
+  button.setAttribute("aria-pressed", String(displayMode === "fullscreen"));
+  button.title =
+    displayMode === "fullscreen"
+      ? "Return to inline view"
+      : "Open fullscreen workbench";
 }
 
 function applyHostChrome() {
-  document.body.dataset.displayMode = hostContext?.displayMode || "inline";
+  document.body.dataset.displayMode = currentDisplayMode();
   if (hostContext?.theme) applyDocumentTheme(hostContext.theme);
   if (hostContext?.styles?.variables)
     applyHostStyleVariables(hostContext.styles.variables);
@@ -368,30 +471,23 @@ function applyHostChrome() {
     applyHostFonts(hostContext.styles.css.fonts);
   if (hostContext?.containerDimensions) {
     const dimensions = hostContext.containerDimensions;
-    if ("width" in dimensions)
-      document.body.style.setProperty("--host-width", `${dimensions.width}px`);
-    if ("height" in dimensions)
-      document.body.style.setProperty(
-        "--host-height",
-        `${dimensions.height}px`
-      );
-    if ("maxWidth" in dimensions && dimensions.maxWidth)
-      document.body.style.setProperty(
-        "--host-width",
-        `${dimensions.maxWidth}px`
-      );
-    if ("maxHeight" in dimensions && dimensions.maxHeight)
-      document.body.style.setProperty(
-        "--host-height",
-        `${dimensions.maxHeight}px`
-      );
+    const width =
+      "width" in dimensions && dimensions.width
+        ? dimensions.width
+        : "maxWidth" in dimensions
+          ? dimensions.maxWidth
+          : undefined;
+    const height =
+      "height" in dimensions && dimensions.height
+        ? dimensions.height
+        : "maxHeight" in dimensions
+          ? dimensions.maxHeight
+          : undefined;
+    if (width) document.body.style.setProperty("--host-width", `${width}px`);
+    if (height) document.body.style.setProperty("--host-height", `${height}px`);
   }
-  if (hostContext?.safeAreaInsets) {
-    document.body.style.paddingTop = `${hostContext.safeAreaInsets.top}px`;
-    document.body.style.paddingRight = `${hostContext.safeAreaInsets.right}px`;
-    document.body.style.paddingBottom = `${hostContext.safeAreaInsets.bottom}px`;
-    document.body.style.paddingLeft = `${hostContext.safeAreaInsets.left}px`;
-  }
+  updateDisplayModeControl();
+  updateBusyControls();
 }
 
 app.ontoolresult = async (result) => {
