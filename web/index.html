@@ -1388,7 +1388,7 @@
         <span style="margin-right: 4px;">Demos</span>
         <button class="sample-btn active" data-sample="audit">Audit (workflow)</button>
         <button class="sample-btn" data-sample="checks">Checks (parallel)</button>
-        <button class="sample-btn" data-sample="version">Version flag (harness)</button>
+        <button class="sample-btn" data-sample="version">Workbench (Smithers)</button>
       </div>
     </div>
   </section>
@@ -1675,42 +1675,41 @@
     },
 
     version: {
-      goal: "Add a --version flag to the CLI.",
-      path: "harness",
-      reason: "Single, focused code change. One agent loop is sufficient.",
+      goal: "Open the Smithers workflow workbench for a project.",
+      path: "project-workflow",
+      reason: "Server-first project workflow viewing and run inspection.",
       latency: "287ms", tokens: "964", runId: "b7c1-04ee-2a55",
-      title: "Smithers CLI Task",
+      title: "Smithers Workbench Task",
       nodes: [
         { id: "goal", type: "goal", title: "User goal", x: 380, y: 30,
           agent: "user",
-          prompt: "Add a --version flag to the CLI.",
+          prompt: "Open the Smithers workflow workbench for a project.",
           tools: [], status: "done",
           timeline: [{ ts: "14:31:08", what: "submitted" }]
         },
         { id: "plan", type: "planner", title: "Planner", x: 380, y: 230,
           agent: "generateObject · planSchema",
-          prompt: "Classify the goal. Tight, well-scoped change → harness path; run one Smithers CLI-agent task with node id worker.",
+          prompt: "Classify the goal. Use the server-first project workflow viewer and inspect Smithers workflow source/run state.",
           tools: ["generateObject"], status: "done",
           timeline: [
             { ts: "14:31:08", tool: "generateObject", arg: "planSchema" },
-            { ts: "14:31:09", what: "decision = harness" },
-            { ts: "14:31:09", what: "spawn: smithers · Task(id=worker, agent=CLI)" },
+            { ts: "14:31:09", what: "decision = project-workflow" },
+            { ts: "14:31:09", what: "open: bun src/server.ts --project <project> --workflow <id>" },
           ],
-          decision: "harness",
+          decision: "project-workflow",
         },
-        { id: "worker", type: "harness-worker", title: "Worker · Smithers CLI task",
+        { id: "worker", type: "harness-worker", title: "Worker · Smithers workbench task",
           x: 380, y: 480,
-          agent: "smithers · CLI AgentLike",
-          prompt: "You are an expert at accomplishing goals. Read the goal, break into steps, execute, verify, then call done. Goal: Add a --version flag to the CLI.",
+          agent: "smithers · project workflow workbench",
+          prompt: "Use the local server-first workbench to render Smithers Workflow Source, edit source-backed fields, start runs, and inspect Smithers SQLite run state.",
           tools: ["read_file","write_file","bash","done"], status: "running",
           timeline: [
             { ts: "14:31:09", tool: "agent.init", arg: "model=claude-sonnet-4-6" },
-            { ts: "14:31:10", tool: "read_file", arg: "src/index.ts" },
-            { ts: "14:31:11", tool: "read_file", arg: "package.json" },
-            { ts: "14:31:13", tool: "write_file", arg: "src/index.ts (+9 −1)" },
-            { ts: "14:31:14", tool: "bash", arg: "bun src/index.ts --version" },
-            { ts: "14:31:14", what: "stdout = 0.1.0" },
-            { ts: "14:31:15", tool: "done", arg: "added --version flag" },
+            { ts: "14:31:10", tool: "read_file", arg: "README.md" },
+            { ts: "14:31:11", tool: "read_file", arg: "src/server.ts" },
+            { ts: "14:31:13", what: "identified active entrypoint = bun src/server.ts --project <project> --workflow <id>" },
+            { ts: "14:31:14", what: "project runs inspect /api/smithers/runs from Smithers SQLite" },
+            { ts: "14:31:15", tool: "done", arg: "opened Smithers workflow workbench" },
           ]
         },
       ],

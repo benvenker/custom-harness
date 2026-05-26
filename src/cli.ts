@@ -2,7 +2,10 @@ export function printHelp() {
   console.log(`
 custom-harness — local visual workbench for Smithers workflows
 
-USAGE
+COMPATIBILITY ENTRYPOINT
+  src/index.ts is retained for help only. It does not run workflows.
+
+ACTIVE APP ENTRYPOINT
   bun src/server.ts --project <project-root> --workflow <workflow-id>
 
 WHAT THIS REPO DOES NOW
