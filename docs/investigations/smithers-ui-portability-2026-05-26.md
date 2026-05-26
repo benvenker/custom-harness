@@ -1,9 +1,11 @@
 # Investigation: Smithers UI Portability and Installability
 
 ## Summary
+
 CustomHarness is **highly feasible to extract into an installable Smithers workflow UI package**, but it is **not installable as-is**. The reusable Smithers substrate already exists in `src/smithersProject/*`, `src/runs/smithersGraph.ts`, and `src/ui/*`; the blocker is boundary collapse in `src/server.ts`, repo-root/static-source assumptions in `web/index.html`, missing package entrypoints, and duplicated browser/MCP UI contracts.
 
 ## Symptoms
+
 - User wants to understand whether CustomHarness can become an installable Smithers workflow UI layer for arbitrary Smithers projects.
 - Need to evaluate how decoupled the current UI is from Smithers and from this repo's demo/prototype assumptions.
 - Need to compare with the MCP apps integration pattern and any prior project that may have pulled UI concerns out more cleanly.
@@ -11,12 +13,14 @@ CustomHarness is **highly feasible to extract into an installable Smithers workf
 ## Background / Prior Research
 
 ### MCP Apps / Portable UI Prior Work
+
 - Repo archaeology points to commit `22af403` (`feat: add Smithers workbench authoring foundation`) as the inflection where the project added `docs/feedback/mcp-apps-ui-layer-research-2026-05-09.md`, `docs/plans/portable-smithers-authoring-workbench.md`, `src/mcp/workbenchApp.ts`, and MCP app dependencies.
 - Prior docs framed MCP Apps as an additional portable UI surface, not a replacement for the browser UI. Key idea: existing `web/index.html` remains the reference surface, while MCP App UI should call app-specific MCP tools instead of depending on same-origin HTTP.
 - The portable-workbench plan called for a pure `WorkbenchService` with HTTP and MCP tool adapters. Current implementation reportedly still keeps much MCP/HTTP adapter logic in `src/server.ts`, and no current `src/workbench/service.ts` was found.
 - Untracked/current ADR-0007 reportedly accepts small named MCP/CLI “Paved Path” operations, while keeping lower-level Smithers primitives code-first; app-only `ch_*` tools are UI plumbing, not the canonical agent-facing contract.
 
 ### Smithers External API / Runtime Constraints
+
 - Smithers project source lives in `.smithers/workflows`, `.smithers/prompts`, `.smithers/components`, and related workflow-pack files.
 - Smithers rendering is React/JSX workflow source → host workflow tree → `GraphSnapshot`. `GraphSnapshot` and persisted Smithers frames are the right graph/history boundary for UI projection.
 - Nearest `smithers.db` is canonical Smithers Run State; read via Smithers package/adapter APIs when possible. Useful read surfaces include run, node, event, frame, and output APIs.
@@ -24,6 +28,7 @@ CustomHarness is **highly feasible to extract into an installable Smithers workf
 - Safe boundary: CustomHarness/portable UI should never manually mutate `_smithers_*` tables or output tables; allowed writes go through Smithers runtime/CLI/API surfaces or ordinary workflow-pack source edits.
 
 ### Sibling Project Patterns
+
 - `/Users/ben/code/poolside/poolside-studio-pr486` has the strongest technical analog: an MCP Apps bridge that separates session/service lifecycle, `ui://` resource validation, tool-result reconstruction, IPC adapters, and UI resource loading.
 - `/Users/ben/code/poolside/spark-proto/frontend/skills-references/al` is the strongest “pulled-out UI layer” analog: shared foundation/components/copy extracted from a prototype into reusable references.
 - Pattern to borrow: separate a portable Smithers/workbench service core and adapters from visual/design-layer extraction. Do not let the browser/MCP App surface become the service boundary.
@@ -117,39 +122,46 @@ Qualification: the `ch_*` contracts are not themselves bad; they are appropriate
 ## Investigation Log
 
 ### Phase 1 - Initial Assessment
+
 **Hypothesis:** The current repo may already contain an adapter boundary analogous to the MCP apps integration, but project workflow UI code may still be coupled to this prototype's server, static HTML, legacy `runs/` compatibility, and Smithers-specific local assumptions.
 **Findings:** Created this report and began external/background fact-gathering before context_builder.
 **Evidence:** `CONTEXT.md` and `docs/smithers-integration-context.md` establish that CustomHarness should preserve Smithers fidelity until the final UI projection step, use Smithers SQLite/API state as canonical, and treat legacy `runs` JSON as compatibility only.
 **Conclusion:** Confirmed enough uncertainty to require full architecture investigation.
 
 ### Phase 1.5 - Prior Research
+
 **Hypothesis:** Existing MCP Apps work and sibling projects may provide an extraction pattern.
 **Findings:** Repo archaeology identified `22af403` as the key MCP Apps/portable workbench inflection; sibling research identified Poolside Studio PR486's MCP Apps bridge as the strongest technical analog and Spark's extracted design references as a UI-layer extraction analog.
 **Evidence:** See `## Background / Prior Research`.
 **Conclusion:** The target pattern is service/core extraction plus thin UI/transport adapters, not copying the browser UI into each project.
 
 ### Phase 2 - Context Builder Assessment
+
 **Hypothesis:** The repo already contains reusable Smithers adapters but lacks an explicit WorkbenchService seam.
 **Findings:** context_builder selected the relevant docs/source/tests and independently summarized the same architecture: `src/smithersProject/*`, `src/runs/smithersGraph.ts`, and `src/ui/*` are reusable; `src/server.ts`, `web/index.html`, MCP App duplication, and package metadata are the main blockers.
 **Evidence:** Selection included `src/server.ts`, `web/index.html`, `src/mcp/workbenchApp.ts`, `src/smithersProject/*`, `src/ui/*`, relevant ADRs/plans, tests, `package.json`, and `README.md`.
 **Conclusion:** Confirmed; needed pair investigator for line-level evidence.
 
 ### Phase 3 - Pair Investigation
+
 **Hypothesis:** File-level evidence would confirm boundary collapse and identify exact extraction seams.
 **Findings:** Pair investigator appended detailed findings under `## Investigator Findings`, with line references for reusable modules, monolithic server boundaries, UI/MCP duplication, package metadata gaps, and command/source-editing risks.
 **Evidence:** `src/server.ts:66-247`, `src/server.ts:419-939`, `src/server.ts:2044-2261`, `src/server.ts:2352-2388`, `src/server.ts:2772-2815`, `package.json:1-30`, `src/cli.ts:1-31`, `src/mcp/workbenchApp.ts:153-245`, `web/index.html` slices, and reusable Smithers adapter files.
 **Conclusion:** Confirmed.
 
 ### Phase 4 - Spot Check and Oracle Synthesis
+
 **Hypothesis:** The final answer should distinguish feasibility from current installability.
 **Findings:** Manual spot-checks confirmed the pair's load-bearing line references. Oracle synthesis framed the root cause as boundary collapse and recommended extracting a transport-neutral `WorkbenchService`, then making HTTP/MCP/CLI thin adapters with separate asset/project roots.
 **Evidence:** Spot-checked the line ranges listed above plus `src/smithersProject/runReader.ts:43-148`, `src/smithersProject/sqliteReadOnly.ts:35-104`, and `src/app/smithersRuntime.ts:118-187`.
 **Conclusion:** High feasibility, medium extraction effort; not package-ready as-is.
 
 ## Root Cause
+
 The root cause is **boundary collapse**: CustomHarness has good Smithers-first internals, but no transport-neutral product boundary yet.
 
 Evidence:
+
 - `src/server.ts:66-247` is the accidental service layer: it dispatches MCP, workflow authoring, run start/cancel, source-field save, source get/save, project/workflow discovery, OpenRouter models, Smithers run list/detail/events, graph render, and static serving.
 - `src/server.ts:419-939` registers app-only MCP `ch_*` tools in the same module as HTTP/static/process concerns; those tools call route/service helper functions rather than a clean service object.
 - `src/server.ts:1140-1286` bundles MCP App HTML/CSS/resources from inside the server module, mixing UI resource packaging with backend service behavior.
@@ -162,11 +174,13 @@ Evidence:
 - `src/server.ts:2352-2388` run cancel hardcodes `bun node_modules/.bin/smithers cancel`, while `src/smithersProject/cli.ts:8-39` has the more portable command-resolution pattern used for run start.
 
 Eliminated hypotheses:
+
 - CustomHarness does **not** need a new workflow model or persisted workflow IR. Existing docs and code correctly keep Workflow Source in `.smithers/*`, Workflow Graph as a projection, and Smithers Run State in `smithers.db`.
 - Historical Run Inspection is **not** fundamentally coupled to current Workflow Source; `src/smithersProject/historicalGraph.ts` and ADR-0005 use persisted Smithers Run Frames.
 - MCP App portability is **not** blocked by same-origin HTTP inside the app; the app already uses MCP tools. The blocker is that those tools and the browser do not share a clean service/client/view-model boundary.
 
 ## Recommendations
+
 1. **Create `src/workbench/service.ts` as the extraction seam.** Move transport-neutral operations from `src/server.ts` into a `WorkbenchService`: project discovery, workflow list, graph render, source get/save, source-field save, run start/cancel, Smithers run list/detail/events, historical graph view, bootstrap summaries, and optional authoring.
 2. **Split service internals by concern.** Add `src/workbench/project.ts`, `graph.ts`, `source.ts`, `runs.ts`, and optional `authoring.ts`. Keep `src/smithersProject/*`, `src/runs/smithersGraph.ts`, and `src/ui/*` as reusable dependencies rather than rewriting them.
 3. **Make HTTP and MCP thin adapters.** Shrink `src/server.ts` or split to `src/http/server.ts` and `src/mcp/server.ts`; route parsing and MCP registration should call `WorkbenchService` directly, not construct synthetic HTTP requests or route helpers.
@@ -178,6 +192,7 @@ Eliminated hypotheses:
 9. **Make the MCP App the near-term portable UI surface.** Keep host-specific display/theme/model-context behavior in `src/mcp/workbenchApp.ts`, but back it with the shared service and operation contracts.
 
 ## Preventive Measures
+
 - Enforce layering: `src/workbench/*` must not import HTTP, MCP, or `web/*`; adapters may import `src/workbench/*`.
 - Add tests that MCP tools do not call HTTP route helpers or construct fake `Request` objects after service extraction.
 - Add package-mode integration tests where `assetRoot` is a packaged fixture, `projectRoot` is a temp Smithers project, and `cwd` is unrelated.
