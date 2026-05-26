@@ -76,6 +76,10 @@ _Avoid_: Canonical project-mode run state, new workflow/run storage
 The current browser surface in CustomHarness for rendering, launching, inspecting, and lightly editing one Smithers project workflow.
 _Avoid_: Calling it the whole product, project mode as a standalone noun, treating its visual styling as canonical
 
+**Paved Path**:
+A first-class agent operation for creating, understanding, changing, running, debugging, or repairing a Smithers Workflow through a documented golden path.
+_Avoid_: Flow, workflow, app state workflow, CustomHarness workflow
+
 ## Relationships
 
 - **CustomHarness** uses **Smithers** as an external workflow runtime and persistence substrate for project workflows.
@@ -96,6 +100,8 @@ _Avoid_: Calling it the whole product, project mode as a standalone noun, treati
 - CustomHarness adapters should preserve **Smithers Run State** fidelity until the final UI projection step; reducing it early into a CustomHarness-specific interface loses provenance without adding authority.
 - The **Smithers Inspection API** is owned by CustomHarness and shaped around the installed Smithers package; it is not a plan to migrate code or concepts upstream into Smithers.
 - The **Project Workflow Viewer** is the behavioral reference for future UI adapters: component inventory, hierarchy, state transitions, provenance language, and safety semantics are meaningful; colors, ornament, exact dimensions, and implementation structure are not.
+- **Paved Paths** coordinate CustomHarness authoring conveniences with Smithers-native render, run, and inspection operations; they are exposed as agent-facing operations but are not persisted workflow definitions.
+- The first canonical **Paved Paths** are **Create Workflow**, **Understand Workflow**, **Change Workflow**, **Run Workflow**, **Debug Run**, and **Repair Workflow**.
 
 ## Example dialogue
 
@@ -123,3 +129,4 @@ _Avoid_: Calling it the whole product, project mode as a standalone noun, treati
 - "Draft" was used to imply a separate workflow-draft entity or database. Resolved: natural-language authoring produces **Generated Workflow Source** directly in the Smithers workflow pack; draft-ness can be captured as source/provenance metadata only.
 - "React workflow" was used loosely to mean Smithers `.tsx`/JSX. Resolved: call this **Workflow Source** or Smithers TSX/JSX DSL; reserve React language for browser/MCP App UI implementation.
 - "Built-in pattern" was ambiguous between Smithers runtime primitives and shipped Smithers library components. Resolved: use **Smithers Pattern Component** for importable components like `Panel`, `ReviewLoop`, and `GatherAndSynthesize`; they compose primitives and are not runtime substrate.
+- "Flow" was ambiguous with **Agentic Workflow** and **Workflow Source**. Resolved: use **Paved Path** for the agent-facing golden paths around Smithers workflows.
