@@ -2,8 +2,8 @@ import type {
   AttemptRow,
   NodeRow,
   RunRow,
-} from "@smithers-orchestrator/db/adapter";
-import type { XmlNode } from "@smithers-orchestrator/graph";
+} from "@smthrs/db/adapter";
+import type { XmlNode } from "@smthrs/graph";
 import { basename, normalize, sep } from "node:path";
 import {
   openSmithersDbReadOnly,

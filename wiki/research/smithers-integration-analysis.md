@@ -17,7 +17,7 @@ Smithers already owns most required orchestration behaviors: workflow discovery,
 
 ## Technical Findings
 
-**Workflow Pack Structure**: `bunx smithers-orchestrator init` generates complete `.smithers/` structure including workflows, prompts, components, configuration, tickets, and execution directories. Documentation recommends starting with this pack rather than manual assembly.
+**Workflow Pack Structure**: `bunx smthrs init` generates complete `.smithers/` structure including workflows, prompts, components, configuration, tickets, and execution directories. Documentation recommends starting with this pack rather than manual assembly.
 
 **Discovery Rules**: CLI discovers `.tsx` files directly under `.smithers/workflows/`, sorts them, and derives IDs from filenames without extension. Enforces lowercase kebab-case naming. Display metadata comes from inline comments.
 
@@ -31,7 +31,7 @@ Smithers already owns most required orchestration behaviors: workflow discovery,
 
 **Integration Points**: Use `graph`/`renderFrame` for previews, `workflow list/path/run` for discovered workflows, `up <file>` for explicit files. Leverage stable integration shapes through `GraphSnapshot`, `TaskDescriptor`, and `RunOptions` types.
 
-**Constraints**: Keep only harness-level concerns like version pinning (`bunx smithers-orchestrator`), task ID stability guidance, input validation, and status forwarding. Avoid custom pack layouts or discovery rules.
+**Constraints**: Keep only harness-level concerns like version pinning (`bunx smthrs`), task ID stability guidance, input validation, and status forwarding. Avoid custom pack layouts or discovery rules.
 
 ## Evidence Quality
 

@@ -10,7 +10,7 @@
 ## Tools
 
 - **[[Smithers Orchestrator]]** - Workflow execution engine and canonical runtime
-  - also: smithers, orchestrator, workflow engine, smithers-orchestrator
+  - also: smithers, orchestrator, workflow engine, smthrs
 
 ## Decisions
 

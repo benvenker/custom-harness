@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHarnessServerHandler } from "../src/server.js";
-import type { GraphSnapshot } from "@smithers-orchestrator/graph";
+import type { GraphSnapshot } from "@smthrs/graph";
 
 function tempProject(prefix: string) {
   return mkdtempSync(join(tmpdir(), prefix));

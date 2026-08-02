@@ -3,7 +3,7 @@ import type {
   GraphSnapshot,
   TaskDescriptor,
   XmlNode,
-} from "@smithers-orchestrator/graph";
+} from "@smthrs/graph";
 import { smithersSnapshotToRenderGraph } from "../src/runs/smithersGraph.js";
 
 function task(

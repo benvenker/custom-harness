@@ -21,10 +21,10 @@ Every implementation agent must preserve these project decisions:
 
 Important local Smithers evidence:
 
-- Smithers workflow IDs are discovered from `<projectRoot>/.smithers/workflows/*.tsx`; workflow commands use `process.cwd()` as project root. Evidence: `node_modules/@smithers-orchestrator/cli/src/workflows.js:11-15`, `node_modules/@smithers-orchestrator/cli/src/workflows.js:84-87`, `node_modules/@smithers-orchestrator/cli/src/index.js:1736-1739`, `node_modules/@smithers-orchestrator/cli/src/index.js:1756-1761`.
-- `workflow run` normalizes `--root` to `.` when not supplied and passes it through to detached `up`. Evidence: `node_modules/@smithers-orchestrator/cli/src/index.js:1375-1388`, `node_modules/@smithers-orchestrator/cli/src/index.js:1455-1470`.
-- The published `smithers` bin delegates to `<projectRoot>/.smithers/node_modules/.bin/smithers` when invoked from project root and that local bin exists. Evidence: `node_modules/smithers-orchestrator/src/bin/smithers.js:8-24`.
-- Smithers adapter `listRuns(limit, status)` applies SQL status filtering and limit before returning rows; for `status === "running"` it includes `continued`. Evidence: `node_modules/@smithers-orchestrator/db/src/adapter/SmithersDb.js:826-839`.
+- Smithers workflow IDs are discovered from `<projectRoot>/.smithers/workflows/*.tsx`; workflow commands use `process.cwd()` as project root. Evidence: `node_modules/@smthrs/cli/src/workflows.js:11-15`, `node_modules/@smthrs/cli/src/workflows.js:84-87`, `node_modules/@smthrs/cli/src/index.js:1736-1739`, `node_modules/@smthrs/cli/src/index.js:1756-1761`.
+- `workflow run` normalizes `--root` to `.` when not supplied and passes it through to detached `up`. Evidence: `node_modules/@smthrs/cli/src/index.js:1375-1388`, `node_modules/@smthrs/cli/src/index.js:1455-1470`.
+- The published `smithers` bin delegates to `<projectRoot>/.smithers/node_modules/.bin/smithers` when invoked from project root and that local bin exists. Evidence: `node_modules/smthrs/src/bin/smithers.js:8-24`.
+- Smithers adapter `listRuns(limit, status)` applies SQL status filtering and limit before returning rows; for `status === "running"` it includes `continued`. Evidence: `node_modules/@smthrs/db/src/adapter/SmithersDb.js:826-839`.
 
 ## Non-negotiable invariants
 
@@ -196,18 +196,18 @@ Current project launch can fail for valid Smithers workflow packs whose dependen
 
 - `src/server.ts:673-693` hard-codes `bun node_modules/.bin/smithers ...` from `projectRoot`.
 - `tests/workflowViewer.run.integration.test.ts:55-56` symlinks both `projectRoot/node_modules` and `projectRoot/.smithers/node_modules`, which masks the root-binary assumption.
-- `node_modules/smithers-orchestrator/src/bin/smithers.js:8-24` delegates a globally resolved/package bin to `.smithers/node_modules/.bin/smithers` when invoked from project root and a local workflow-pack bin exists.
-- `node_modules/@smithers-orchestrator/cli/src/index.js:1736-1739` resolves `workflow run <id>` from `process.cwd()`, so the command must run from `projectRoot`.
+- `node_modules/smthrs/src/bin/smithers.js:8-24` delegates a globally resolved/package bin to `.smithers/node_modules/.bin/smithers` when invoked from project root and a local workflow-pack bin exists.
+- `node_modules/@smthrs/cli/src/index.js:1736-1739` resolves `workflow run <id>` from `process.cwd()`, so the command must run from `projectRoot`.
 
 ### Recommended implementation shape
 
-Resolve this open decision now: **use local-first command resolution, with `bunx smithers-orchestrator` as fallback**.
+Resolve this open decision now: **use local-first command resolution, with `bunx smthrs` as fallback**.
 
 Rationale:
 
 - Local root bin keeps current projects deterministic when they already install Smithers at root.
 - `.smithers/node_modules/.bin/smithers` supports the workflow-pack dependency layout directly.
-- `bunx smithers-orchestrator` is documented and can delegate to `.smithers/node_modules` when run from project root, but as the only path it may pull a version that differs from the project.
+- `bunx smthrs` is documented and can delegate to `.smithers/node_modules` when run from project root, but as the only path it may pull a version that differs from the project.
 
 Extract command construction into a pure helper, e.g. `src/smithersProject/cli.ts`:
 
@@ -219,7 +219,7 @@ Recommended fallback order:
 
 1. If `<projectRoot>/node_modules/.bin/smithers` exists, run `bun <that-relative-or-absolute-bin> workflow run ...` from `projectRoot`.
 2. Else if `<projectRoot>/.smithers/node_modules/.bin/smithers` exists, run `bun <that-bin> workflow run ...` from `projectRoot`.
-3. Else run `bunx smithers-orchestrator workflow run ...` from `projectRoot`.
+3. Else run `bunx smthrs workflow run ...` from `projectRoot`.
 
 Keep the command source-backed and project-rooted:
 
@@ -227,7 +227,7 @@ Keep the command source-backed and project-rooted:
 workflow run <workflowId> --input '<json>' --detach --format json --root .
 ```
 
-Do not add `--log-dir .smithers/executions`; Smithers normalizes `workflow run` root to `.` and detached `up` receives `--root .` (`node_modules/@smithers-orchestrator/cli/src/index.js:1375-1388`, `:1455-1470`). DB state remains authoritative even if Smithers’ detached log-file behavior changes.
+Do not add `--log-dir .smithers/executions`; Smithers normalizes `workflow run` root to `.` and detached `up` receives `--root .` (`node_modules/@smthrs/cli/src/index.js:1375-1388`, `:1455-1470`). DB state remains authoritative even if Smithers’ detached log-file behavior changes.
 
 ### Bad implementations to avoid
 
@@ -243,7 +243,7 @@ Write failing tests before implementation:
 
 1. Pure command helper test: root local bin exists → chooses `root-local` and includes `workflow run foo --input <json> --detach --format json --root .`.
 2. Pure command helper test: only `.smithers/node_modules/.bin/smithers` exists → chooses `workflow-pack-local`, keeps `cwd = projectRoot`, and does not require root `node_modules`.
-3. Pure command helper test: no local bin → chooses `bunx smithers-orchestrator ...`.
+3. Pure command helper test: no local bin → chooses `bunx smthrs ...`.
 4. Route-level seam test remains: fake runner receives only `{ projectRoot, workflowId, workflowPath, input }`, no `promptOverrides`.
 5. Integration fixture should stop symlinking root `node_modules` solely to satisfy launch. If real `.smithers/node_modules` fixture setup is too slow, keep a fake spawn/command-selection test and document the integration limitation.
 
@@ -285,7 +285,7 @@ Make `SmithersRunReader.listRuns({ workflowId, limit })` return the newest match
 ### Current evidence
 
 - `src/smithersProject/runReader.ts:59-62` calls `handle.adapter.listRuns(options.limit ?? 50, options.status)` and then filters with `matchesWorkflowId()`.
-- Smithers adapter `listRuns(limit, status)` applies `ORDER BY created_at_ms DESC LIMIT ?` in SQL before CustomHarness sees rows. Evidence: `node_modules/@smithers-orchestrator/db/src/adapter/SmithersDb.js:826-839`.
+- Smithers adapter `listRuns(limit, status)` applies `ORDER BY created_at_ms DESC LIMIT ?` in SQL before CustomHarness sees rows. Evidence: `node_modules/@smthrs/db/src/adapter/SmithersDb.js:826-839`.
 - `matchesWorkflowId()` already encodes the intended name/path matching at `src/smithersProject/runReader.ts:263-272`.
 
 ### Recommended implementation shape
@@ -378,7 +378,7 @@ Implementation details:
 
 ### Bad implementations to avoid
 
-- Do not import `@smithers-orchestrator/cli/src/find-db.js` if it opens write-capable connections or ensures tables.
+- Do not import `@smthrs/cli/src/find-db.js` if it opens write-capable connections or ensures tables.
 - Do not create an empty `smithers.db` to satisfy reads.
 - Do not search downward through project trees; nearest DB means upward from a known start.
 - Do not silently fall back to legacy `runs/` artifacts when DB is missing.
@@ -407,7 +407,7 @@ Expected current failing behavior: nested start options do not exist and only pr
 ```bash
 bun test tests/smithersRunReader.test.ts
 bun tsc --noEmit
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 rg -n "openSmithersDb\(|findAndOpenDb\(" src/smithersProject
 ```
 
@@ -551,7 +551,7 @@ Write failing tests only for missing guards. Suggested additions:
 ```bash
 bun test tests/
 bun tsc --noEmit
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 rg -n "\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b.*_smithers|_smithers_.*\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b" src/smithersProject src/server.ts
 rg -n "createRunRecorder|runs/index\.json|plan\.json|run\.json|events\.jsonl|workflowGraph" src/smithersProject src/server.ts web/index.html
 br dep cycles --json
@@ -600,14 +600,14 @@ Read before editing:
 - `src/server.ts:609-693`
 - `tests/workflowViewer.run.test.ts`
 - `tests/workflowViewer.run.integration.test.ts:1-170`
-- `node_modules/smithers-orchestrator/src/bin/smithers.js:8-24`
-- `node_modules/@smithers-orchestrator/cli/src/workflows.js:11-15`, `:84-87`
-- `node_modules/@smithers-orchestrator/cli/src/index.js:1375-1388`, `:1455-1470`, `:1736-1739`
+- `node_modules/smthrs/src/bin/smithers.js:8-24`
+- `node_modules/@smthrs/cli/src/workflows.js:11-15`, `:84-87`
+- `node_modules/@smthrs/cli/src/index.js:1375-1388`, `:1455-1470`, `:1736-1739`
 
 Run before editing / during review:
 
 ```bash
-rg -n "node_modules/.bin/smithers|bunx smithers-orchestrator|workflow run|--root|--log-dir|runProjectWorkflow" src/server.ts tests
+rg -n "node_modules/.bin/smithers|bunx smthrs|workflow run|--root|--log-dir|runProjectWorkflow" src/server.ts tests
 rg -n "promptOverrides|runSmithersWorkflow\(" src/server.ts tests/workflowViewer.run.test.ts
 ```
 
@@ -621,7 +621,7 @@ Read before editing:
 - `src/smithersProject/sqliteReadOnly.ts`
 - `src/smithersProject/runReaderTypes.ts`
 - `tests/smithersRunReader.test.ts`
-- `node_modules/@smithers-orchestrator/db/src/adapter/SmithersDb.js:826-839`
+- `node_modules/@smthrs/db/src/adapter/SmithersDb.js:826-839`
 
 Run before editing / during review:
 
@@ -686,7 +686,7 @@ Run before editing / during review:
 ```bash
 rg -n "createRunRecorder|runs/index\.json|plan\.json|run\.json|events\.jsonl|workflowGraph" src/smithersProject src/server.ts web/index.html tests
 rg -n "smithersSnapshotToRenderGraph|_smithers_frames" src/smithersProject src/ui web/index.html tests
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject tests
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject tests
 ```
 
 ## Execution order and parallelization
@@ -881,7 +881,7 @@ Required reading:
 - src/smithersProject/runReader.ts
 - src/smithersProject/runReaderTypes.ts
 - tests/smithersRunReader.test.ts
-- node_modules/@smithers-orchestrator/db/src/adapter/SmithersDb.js:826-839
+- node_modules/@smthrs/db/src/adapter/SmithersDb.js:826-839
 
 Scope:
 - Edit tests/smithersRunReader.test.ts only.
@@ -953,8 +953,8 @@ Required reading:
 - src/server.ts:609-693
 - tests/workflowViewer.run.test.ts
 - tests/workflowViewer.run.integration.test.ts
-- node_modules/smithers-orchestrator/src/bin/smithers.js:8-24
-- node_modules/@smithers-orchestrator/cli/src/index.js:1375-1388,1455-1470,1736-1739
+- node_modules/smthrs/src/bin/smithers.js:8-24
+- node_modules/@smthrs/cli/src/index.js:1375-1388,1455-1470,1736-1739
 
 Scope:
 - Edit tests/workflowViewer.run.test.ts and/or tests/workflowViewer.run.integration.test.ts.
@@ -998,7 +998,7 @@ Scope:
 - tests only to keep 2A tests aligned
 
 Requirements:
-- Resolve Smithers CLI local-first: projectRoot/node_modules/.bin/smithers, then projectRoot/.smithers/node_modules/.bin/smithers, then bunx smithers-orchestrator.
+- Resolve Smithers CLI local-first: projectRoot/node_modules/.bin/smithers, then projectRoot/.smithers/node_modules/.bin/smithers, then bunx smthrs.
 - Always run from projectRoot.
 - Keep command source-backed: workflow run <workflowId> --input <json> --detach --format json --root .
 - Do not add --log-dir unless a focused test proves it is required.
@@ -1154,7 +1154,7 @@ Non-goals:
 Validation:
 - bun test tests/smithersRunReader.test.ts
 - bun tsc --noEmit
-- rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+- rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 - rg -n "openSmithersDb\(|findAndOpenDb\(" src/smithersProject
 ```
 
@@ -1227,7 +1227,7 @@ Non-goals:
 Validation:
 - bun test tests/
 - bun tsc --noEmit
-- rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+- rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 - rg -n "\\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\\b.*_smithers|_smithers_.*\\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\\b" src/smithersProject src/server.ts
 - rg -n "createRunRecorder|runs/index\.json|plan\.json|run\.json|events\.jsonl|workflowGraph" src/smithersProject src/server.ts web/index.html
 - br dep cycles --json
@@ -1245,7 +1245,7 @@ bun tsc --noEmit
 # Reader changes
 bun test tests/smithersRunReader.test.ts tests/server.test.ts
 bun tsc --noEmit
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 rg -n "\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b.*_smithers|_smithers_.*\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b" src/smithersProject src/server.ts
 
 # Server/run changes
@@ -1313,7 +1313,7 @@ Each B bead should include:
 
 None for the current hardening scope. Previously open questions are resolved as follows:
 
-- CLI resolution: local-first (`projectRoot/node_modules/.bin/smithers`, then `.smithers/node_modules/.bin/smithers`) with `bunx smithers-orchestrator` fallback.
+- CLI resolution: local-first (`projectRoot/node_modules/.bin/smithers`, then `.smithers/node_modules/.bin/smithers`) with `bunx smthrs` fallback.
 - DB discovery: support explicit `dbPath`, then `dbSearchStart`/workflow-path-adjacent upward search, then `projectRoot` upward search.
 - Live preview refresh during a run: preserve DB overlay when live detail exists; clear live mode only through explicit user navigation/actions.
 - Events cursor: `nextEventSeq` means last seen event seq for the next `afterSeq`; empty pages preserve caller cursor or DB last seq.

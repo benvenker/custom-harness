@@ -136,7 +136,7 @@ describe("Smithers CLI command resolution for project runs", () => {
     expectWorkflowRunCommand(command, projectRoot, input);
   });
 
-  it("falls back to bunx smithers-orchestrator when no local smithers bin exists", async () => {
+  it("falls back to bunx smthrs when no local smithers bin exists", async () => {
     const projectRoot = tempProject("custom-harness-cli-bunx-");
     const input = { prompt: "Fallback please" };
 
@@ -148,7 +148,7 @@ describe("Smithers CLI command resolution for project runs", () => {
     });
 
     expect(command.source).toBe("bunx");
-    expect(command.cmd.slice(0, 2)).toEqual(["bunx", "smithers-orchestrator"]);
+    expect(command.cmd.slice(0, 2)).toEqual(["bunx", "smthrs"]);
     expectWorkflowRunCommand(command, projectRoot, input);
   });
 });

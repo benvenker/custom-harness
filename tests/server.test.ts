@@ -1015,8 +1015,8 @@ describe("HTTP server DB-backed Smithers run inspection API", () => {
             ', prompt: "Summarize {{userPrompt}}" } } } as const;\nconst agent = new PiAgent({ provider: "openai", model: editable.agents.main.model });';
         return {
           model: "fake-author",
-          source: `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, PiAgent } from "smithers-orchestrator";
+          source: `/** @jsxImportSource smthrs */
+import { createSmithers, PiAgent } from "smthrs";
 import { z } from "zod";
 const inputSchema = z.object({ prompt: z.string().default(${JSON.stringify(prompt)}) });
 const outputSchema = z.looseObject({ summary: z.string() });

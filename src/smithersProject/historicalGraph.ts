@@ -4,7 +4,7 @@ import type {
   TaskDescriptor,
   XmlElement,
   XmlNode,
-} from "@smithers-orchestrator/graph";
+} from "@smthrs/graph";
 import {
   smithersSnapshotToRenderGraph,
   type RenderGraph,

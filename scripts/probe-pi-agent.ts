@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { PiAgent } from '@smithers-orchestrator/agents';
+import { PiAgent } from '@smthrs/agents';
 
 function parseArgs(args: string[]) {
   const get = (flag: string, fallback?: string) => {

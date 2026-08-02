@@ -66,7 +66,7 @@ function writeSafeProject() {
   writeFileSync(join(projectRoot, '.smithers', 'package.json'), JSON.stringify({ type: 'module' }, null, 2));
   writeFileSync(join(workflowsDir, 'foo.tsx'), `
 import React from 'react';
-import { createSmithers } from 'smithers-orchestrator';
+import { createSmithers } from 'smthrs';
 import { z } from 'zod';
 
 const schemas = { task: z.object({ result: z.string() }) };

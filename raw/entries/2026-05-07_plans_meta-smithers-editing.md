@@ -33,10 +33,10 @@ Local evidence checked for this plan:
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt:567-606`: Smithers is a render → extract → execute → persist → re-render loop. The UI should reflect that loop instead of inventing a separate runtime model.
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt:895-927`: workflow packs live under `.smithers/` with `workflows`, `prompts`, `components`, agents, config, and execution artifacts.
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt:6740-6787`, `:6927-6934`, `:7071-7096`: `workflow run`, `graph`, `workflow list`, `workflow path`, and `workflow create` are the native CLI surfaces this app should mirror or call.
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/types.ts`: `GraphSnapshot` is `{ runId, frameNo, xml, tasks }`; `TaskDescriptor` carries `nodeId`, dependencies, agent, prompt, output schema/table, label, and `meta?: Record<string, unknown>`.
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/extract.js`: task `raw.meta` is preserved into `TaskDescriptor.meta`; this is the Smithers primitive that makes `meta.studio` viable.
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/cli/src/workflows.js`: workflow discovery is flat `.smithers/workflows/*.tsx`; workflow ids use lowercase kebab-case; source/display comments are already parsed by Smithers discovery.
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/engine/src/engine.js`: `runWorkflow` persists input and run identity into Smithers state. The app should start runs through Smithers, not fabricate run rows or mutate completed run internals.
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/graph/src/types.ts`: `GraphSnapshot` is `{ runId, frameNo, xml, tasks }`; `TaskDescriptor` carries `nodeId`, dependencies, agent, prompt, output schema/table, label, and `meta?: Record<string, unknown>`.
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/graph/src/extract.js`: task `raw.meta` is preserved into `TaskDescriptor.meta`; this is the Smithers primitive that makes `meta.studio` viable.
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/cli/src/workflows.js`: workflow discovery is flat `.smithers/workflows/*.tsx`; workflow ids use lowercase kebab-case; source/display comments are already parsed by Smithers discovery.
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/engine/src/engine.js`: `runWorkflow` persists input and run identity into Smithers state. The app should start runs through Smithers, not fabricate run rows or mutate completed run internals.
 - `docs/adr/0001-runs-in-smithers-canonical-location.md`: canonical run state is Smithers DB/log state, not CustomHarness `runs/` JSON.
 - `docs/adr/0003-reflect-smithers-first-smooth-with-overlays.md`: Poolside/CustomHarness overlays may smooth labels, layout, drafts, and warnings, but Smithers owns workflow structure, runtime behavior, run state, forks, prompts, agents, schemas, and reusable components.
 
@@ -63,7 +63,7 @@ Local evidence checked for this plan:
 - Do not patch Smithers DB rows or output tables to make an old run look edited. Use Smithers-native fork/replay APIs later if run editing becomes a product requirement.
 - Do not infer source edit locations from arbitrary JSX. If `meta.studio` does not declare a safe source target, show read-only preview plus **Edit source (.tsx)**.
 - Do not make CustomHarness overlays required for Smithers to discover, render, or run a workflow.
-- Do not call bare `smithers`; Smithers docs say to use `bunx smithers-orchestrator` from the project root for CLI workflows.
+- Do not call bare `smithers`; Smithers docs say to use `bunx smthrs` from the project root for CLI workflows.
 
 ## Product principles
 
@@ -341,10 +341,10 @@ Preferred first version:
 - Canonical Smithers commands are shown for inspection:
 
 ```bash
-bunx smithers-orchestrator ps
-bunx smithers-orchestrator inspect <run-id>
-bunx smithers-orchestrator chat <run-id> --follow
-bunx smithers-orchestrator logs <run-id>
+bunx smthrs ps
+bunx smthrs inspect <run-id>
+bunx smthrs chat <run-id> --follow
+bunx smthrs logs <run-id>
 ```
 
 ### Save as workflow copy
@@ -617,7 +617,7 @@ rg -n "node_modules/.bin/smithers|bunx smithers(?!-orchestrator)|insertRun|_smit
 
 Expected rule:
 
-- `bunx smithers-orchestrator ...` is acceptable in docs/commands.
+- `bunx smthrs ...` is acceptable in docs/commands.
 - Direct Smithers runtime APIs are acceptable when the code is intentionally using Smithers as the runtime.
 - Manual Smithers DB writes or fake run JSON are not acceptable for project-mode source editing or run launch.
 
@@ -639,7 +639,7 @@ Then the returned graph node includes the studio metadata needed by the inspecto
 
 Implementation notes:
 
-- Smithers `TaskDescriptor` already has `meta?: Record<string, unknown>` in `@smithers-orchestrator/graph`.
+- Smithers `TaskDescriptor` already has `meta?: Record<string, unknown>` in `@smthrs/graph`.
 - Extend `RenderNode.smithers` in `src/runs/smithersGraph.ts` with `meta?: Record<string, unknown>`.
 - Copy `descriptor?.meta` into `node.smithers.meta` for task nodes.
 - Do not serialize metadata from arbitrary XML props; use the descriptor because that is where non-string metadata survives.
@@ -937,10 +937,10 @@ Test additions:
 
 - Unit/seam test: saved source edit, then `/api/workflows/foo/run` invokes `runProjectWorkflow` with `workflowId`, `workflowPath`, and `input`; it does not include `promptOverrides` or `outputs`.
 - UI helper test: run success copy includes the run id and the four commands:
-  - `bunx smithers-orchestrator ps`
-  - `bunx smithers-orchestrator inspect <run-id>`
-  - `bunx smithers-orchestrator chat <run-id> --follow`
-  - `bunx smithers-orchestrator logs <run-id>`
+  - `bunx smthrs ps`
+  - `bunx smthrs inspect <run-id>`
+  - `bunx smthrs chat <run-id> --follow`
+  - `bunx smthrs logs <run-id>`
 - Integration test can keep the existing safe real Smithers run, but add input assertion if the fixture echoes input into output/logs.
 - Regression test: no legacy custom-harness `runs/` directory is created for project-mode Smithers runs.
 

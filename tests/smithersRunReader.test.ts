@@ -850,10 +850,10 @@ describe("SmithersRunReader contract", () => {
       expect(existsSync(modulePath), `${modulePath} should exist`).toBe(true);
       const source = readFileSync(modulePath, "utf8");
       expect(source, modulePath).not.toMatch(
-        /from ['"]@smithers-orchestrator\/db\/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(/
+        /from ['"]@smthrs\/db\/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(/
       );
       expect(source, modulePath).not.toMatch(
-        /openSmithersDb\(|findAndOpenDb\(|@smithers-orchestrator\/cli\/src\/find-db/
+        /openSmithersDb\(|findAndOpenDb\(|@smthrs\/cli\/src\/find-db/
       );
       expect(source, modulePath).not.toMatch(
         /createRunRecorder|runs\/index\.json|plan\.json|run\.json|events\.jsonl/

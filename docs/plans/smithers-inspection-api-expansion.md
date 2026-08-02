@@ -14,7 +14,7 @@ Read these before implementation:
 - `docs/agents/domain.md` — domain-doc consumer rules for agent skills.
 - `docs/smithers-integration-context.md` — Smithers' role as foundational third-party infrastructure.
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt` — downloaded Smithers reference docs.
-- Installed Smithers package source under `node_modules/@smithers-orchestrator/`.
+- Installed Smithers package source under `node_modules/@smthrs/`.
 - `docs/adr/0001-runs-in-smithers-canonical-location.md` — Smithers DB is canonical run state.
 - `docs/adr/0003-reflect-smithers-first-smooth-with-overlays.md` — reflect Smithers first; overlays are presentation aids.
 - `docs/adr/0004-project-mode-run-inspection-reads-smithers-sqlite.md` — project-mode inspection reads Smithers SQLite.
@@ -177,7 +177,7 @@ Goal: understand what the installed Smithers dependency exposes for frames and r
 
 Tasks:
 
-- Inspect `node_modules/@smithers-orchestrator/db/src/adapter.js` and type declarations.
+- Inspect `node_modules/@smthrs/db/src/adapter.js` and type declarations.
 - List stable read methods for runs, nodes, attempts, frames, and events already used by the current reader.
 - Identify which frame methods already perform important behavior, especially delta inflation.
 - Identify missing frame/task-index read surfaces that require centralized read-only SQL in `src/smithersProject`.
@@ -199,21 +199,21 @@ Installed Smithers already exposes the frame reads needed for historical v1; Cus
 
 Relevant Smithers package files:
 
-- `node_modules/@smithers-orchestrator/db/src/adapter.js`
+- `node_modules/@smthrs/db/src/adapter.js`
   - Read methods for current inspection: `getRun`, `listRuns`, `listNodes`, `listAttemptsForRun`, `listEventHistory`, `getLastEventSeq`, `getRawNodeOutputForIteration`.
   - Frame methods: `getLastFrame`, `listFrames`, `listFrameChainDesc`, `inflateFrameRow`, `reconstructFrameXml`.
   - Future read surfaces noted but out of v1: `listSignals`, `listPendingApprovals`, `listApprovalHistoryForNode`, `listPendingHumanRequests`, `listAlerts`, `listScorerResults`, `listCacheByNode`.
-- `node_modules/@smithers-orchestrator/db/src/index.d.ts`
+- `node_modules/@smthrs/db/src/index.d.ts`
   - Exports `FrameRow` with `runId`, `frameNo`, `createdAtMs`, `xmlJson`, `xmlHash`, `encoding`, `mountedTaskIdsJson`, `taskIndexJson`, and `note`.
   - Exports frame-codec helpers, but CustomHarness should not call them for normal inspection when adapter inflation is available.
-- `node_modules/@smithers-orchestrator/db/src/frame-codec.js`
+- `node_modules/@smthrs/db/src/frame-codec.js`
   - Implements `normalizeFrameEncoding`, `parseFrameDelta`, `applyFrameDelta`, and `applyFrameDeltaJson`; these are used by the adapter during inflation.
-- `node_modules/@smithers-orchestrator/graph/src/utils/xml.js`
-  - Exposes `parseXmlJson(json)` and `canonicalizeXml(node)` at runtime through the `@smithers-orchestrator/graph/utils/xml` subpath. Type declarations for that subpath may need a local shim if TypeScript import ergonomics fail.
+- `node_modules/@smthrs/graph/src/utils/xml.js`
+  - Exposes `parseXmlJson(json)` and `canonicalizeXml(node)` at runtime through the `@smthrs/graph/utils/xml` subpath. Type declarations for that subpath may need a local shim if TypeScript import ergonomics fail.
 - Smithers examples that already read frames this way:
-  - `node_modules/@smithers-orchestrator/server/src/gatewayRoutes/getDevToolsSnapshot.js` uses `adapter.getLastFrame()` for the latest frame and `adapter.listFrames(...).find(...)` for a requested historical frame before parsing `xmlJson`.
-  - `node_modules/@smithers-orchestrator/server/src/gatewayRoutes/streamDevTools.js` obtains latest frames through the same adapter-backed route.
-  - `node_modules/@smithers-orchestrator/cli/src/tui/components/FramesPane.jsx` calls `adapter.listFrames(runId, 500)` and parses returned `xmlJson`.
+  - `node_modules/@smthrs/server/src/gatewayRoutes/getDevToolsSnapshot.js` uses `adapter.getLastFrame()` for the latest frame and `adapter.listFrames(...).find(...)` for a requested historical frame before parsing `xmlJson`.
+  - `node_modules/@smthrs/server/src/gatewayRoutes/streamDevTools.js` obtains latest frames through the same adapter-backed route.
+  - `node_modules/@smthrs/cli/src/tui/components/FramesPane.jsx` calls `adapter.listFrames(runId, 500)` and parses returned `xmlJson`.
 
 Frame inflation behavior:
 

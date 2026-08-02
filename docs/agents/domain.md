@@ -25,7 +25,7 @@ For Smithers-related work, also read:
 
 1. `docs/smithers-integration-context.md`
 2. `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt`
-3. relevant installed package source under `node_modules/@smithers-orchestrator/`
+3. relevant installed package source under `node_modules/@smthrs/`
 
 If a referenced file is missing in a future checkout, proceed silently and use the available docs.
 
