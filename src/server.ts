@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
-import type { GraphSnapshot } from "@smithers-orchestrator/graph";
+import type { GraphSnapshot } from "@smthrs/graph";
 import {
   RESOURCE_MIME_TYPE,
   registerAppResource,
@@ -1660,11 +1660,11 @@ function extractWorkflowSource(
     ""
   );
   const withHeader = `${header}${withoutDuplicateHeader}`;
-  return withHeader.includes("/** @jsxImportSource smithers-orchestrator */")
+  return withHeader.includes("/** @jsxImportSource smthrs */")
     ? withHeader.endsWith("\n")
       ? withHeader
       : `${withHeader}\n`
-    : `${header}/** @jsxImportSource smithers-orchestrator */\n${withoutDuplicateHeader}\n`;
+    : `${header}/** @jsxImportSource smthrs */\n${withoutDuplicateHeader}\n`;
 }
 
 function generatedWorkflowSourceValidationIssues(
@@ -2625,9 +2625,9 @@ function smithersAuthorSystemPrompt() {
 
 Hard requirements:
 - Return only a complete .tsx source file. No markdown explanation.
-- Use /** @jsxImportSource smithers-orchestrator */ near the top.
-- Import only from "smithers-orchestrator" and "zod" unless a normal Smithers component import is truly necessary.
-- Prefer: import { createSmithers, PiAgent } from "smithers-orchestrator"; import { z } from "zod";
+- Use /** @jsxImportSource smthrs */ near the top.
+- Import only from "smthrs" and "zod" unless a normal Smithers component import is truly necessary.
+- Prefer: import { createSmithers, PiAgent } from "smthrs"; import { z } from "zod";
 - Create an input schema with prompt: z.string().default(...). The CustomHarness v0 browser UI always sends the primary textarea as ctx.input.prompt and ctx.input.request; domain-specific names like plan or idea must be optional aliases, not the only required input.
 - If the user asks for a domain input such as plan, define plan: z.string().optional() and use const userPlan = ctx.input.plan || ctx.input.prompt; never render user-facing prompts from ctx.input.plan alone.
 - Use createSmithers({ input: inputSchema, ...outputSchemas }).

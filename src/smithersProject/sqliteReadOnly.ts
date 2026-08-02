@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, statSync } from 'node:fs';
 import { dirname, parse, resolve } from 'node:path';
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
-import { SmithersDb } from '@smithers-orchestrator/db/adapter';
+import { SmithersDb } from '@smthrs/db/adapter';
 
 export type SqliteReadOnlyOpenOptions = {
   projectRoot: string;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { createSmithers, type AgentLike } from 'smithers-orchestrator';
+import { createSmithers, type AgentLike } from 'smthrs';
 import { z } from 'zod';
 
 const schemas = {

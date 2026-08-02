@@ -1,4 +1,4 @@
-import type { GraphSnapshot, TaskDescriptor, XmlElement, XmlNode } from '@smithers-orchestrator/graph';
+import type { GraphSnapshot, TaskDescriptor, XmlElement, XmlNode } from '@smthrs/graph';
 
 type RunPath = 'harness' | 'workflow';
 type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | string;

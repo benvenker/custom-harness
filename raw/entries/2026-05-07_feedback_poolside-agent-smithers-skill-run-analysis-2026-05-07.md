@@ -85,9 +85,9 @@ The agent recovered by reading the scaffolded file and retrying.
 
 This is a harness safety rule. The skill can mention it, but the implementation lives in poolside_agent/harness.
 
-### 5. Skill recommended `bunx smithers-orchestrator`
+### 5. Skill recommended `bunx smthrs`
 
-The skill instructed the agent to use `bunx smithers-orchestrator` for Smithers commands. During graph verification, this caused a duplicate React / invalid hook call issue.
+The skill instructed the agent to use `bunx smthrs` for Smithers commands. During graph verification, this caused a duplicate React / invalid hook call issue.
 
 The agent discovered the fix: use the locally installed CLI instead:
 
@@ -107,13 +107,13 @@ skills/smithers-workflow-authoring/SKILL.md
 
 ### 1. Prefer local Smithers CLI over `bunx`
 
-Replace direct `bunx smithers-orchestrator ...` examples with a local-first pattern:
+Replace direct `bunx smthrs ...` examples with a local-first pattern:
 
 ```bash
 if [ -x ./node_modules/.bin/smithers ]; then
   SMITHERS=./node_modules/.bin/smithers
 else
-  SMITHERS="bunx smithers-orchestrator"
+  SMITHERS="bunx smthrs"
 fi
 ```
 

@@ -124,11 +124,11 @@ export async function loadSmithersRuntime(
 ): Promise<SmithersRuntime> {
   const nodeModulesDir = findNearestNodeModulesWithPackage(
     dirname(workflowPath),
-    ["@smithers-orchestrator", "engine"]
+    ["@smthrs", "engine"]
   );
   if (!nodeModulesDir) {
     throw new Error(
-      `Could not find @smithers-orchestrator/engine for workflow: ${workflowPath}`
+      `Could not find @smthrs/engine for workflow: ${workflowPath}`
     );
   }
   const [engine, driver, effect] = await Promise.all([
@@ -136,7 +136,7 @@ export async function loadSmithersRuntime(
       pathToFileURL(
         join(
           nodeModulesDir,
-          "@smithers-orchestrator",
+          "@smthrs",
           "engine",
           "src",
           "index.js"
@@ -147,7 +147,7 @@ export async function loadSmithersRuntime(
       pathToFileURL(
         join(
           nodeModulesDir,
-          "@smithers-orchestrator",
+          "@smthrs",
           "driver",
           "src",
           "SmithersCtx.js"

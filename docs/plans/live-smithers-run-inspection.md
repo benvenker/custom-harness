@@ -76,7 +76,7 @@ Project-mode run inspection must never use those compatibility artifacts to deci
 
 ### Smithers DB/schema evidence
 
-Smithers defines these run-state tables in `node_modules/@smithers-orchestrator/db/src/sql-message-storage.js`:
+Smithers defines these run-state tables in `node_modules/@smthrs/db/src/sql-message-storage.js`:
 
 - `_smithers_runs`
 - `_smithers_nodes`
@@ -995,7 +995,7 @@ Coordination rules:
 - **Detached launch race:** UI may poll before `_smithers_runs` row exists. Handle temporary 404 with bounded retry.
 - **Output table normalization:** Output rows may use snake_case/camelCase and JSON text depending schema. Normalize minimally and keep raw row available.
 - **Current `--log-dir` override:** Passing `--log-dir .smithers/executions` likely bypasses per-run default log dirs. Remove the override unless a test proves a canonical replacement.
-- **Dependency imports:** If importing `@smithers-orchestrator/db` directly from CustomHarness, make it an explicit dependency rather than relying on transitive package layout.
+- **Dependency imports:** If importing `@smthrs/db` directly from CustomHarness, make it an explicit dependency rather than relying on transitive package layout.
 - **Status vocabulary drift:** Smithers uses `finished` for successful terminal runs in current evidence; legacy UI expects `succeeded`. Keep a small status-normalization helper with tests instead of scattering string checks.
 
 ## 12. Milestone acceptance checklist

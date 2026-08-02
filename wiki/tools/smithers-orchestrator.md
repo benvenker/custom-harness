@@ -29,8 +29,8 @@ Graph rendering via `renderFrame` returns `GraphSnapshot` objects containing run
 
 ## Package Structure
 
-Version 0.18.0 is distributed as `smithers-orchestrator` on npm, with CLI binary named `smithers`. The package exports facade functions and depends on specialized packages for CLI, engine, database, graph, scheduler, server, and time-travel capabilities.
+Version 0.18.0 is distributed as `smthrs` on npm, with CLI binary named `smithers`. The package exports facade functions and depends on specialized packages for CLI, engine, database, graph, scheduler, server, and time-travel capabilities.
 
 ## Workflow Pack Convention
 
-Smithers defines a standard project structure via `bunx smithers-orchestrator init` that creates `.smithers/` containing workflows, prompts, components, package configuration, and execution directories. This convention eliminates the need for custom discovery rules or pack layouts.
+Smithers defines a standard project structure via `bunx smthrs init` that creates `.smithers/` containing workflows, prompts, components, package configuration, and execution directories. This convention eliminates the need for custom discovery rules or pack layouts.

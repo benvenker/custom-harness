@@ -79,7 +79,7 @@ All render, run, and Smithers-readiness behavior must go through a narrow `Smith
 
 Alpha default:
 
-- Prefer shelling out to the project-local Smithers CLI/runtime using the canonical Smithers command convention: `bunx smithers-orchestrator ...`.
+- Prefer shelling out to the project-local Smithers CLI/runtime using the canonical Smithers command convention: `bunx smthrs ...`.
 - Verify the exact cwd, command names, flags, and output behavior before implementation.
 - In-process `renderFrame` may exist only behind `SmithersAdapter` as a fallback if the project-local CLI is proven insufficient, or as a fake/test seam.
 
@@ -1495,7 +1495,7 @@ Mitigation: every render/run/fork feature must map to Smithers runtime/CLI/DB co
 Do not assume these Smithers behaviors from this plan. Verify them against the local Smithers package/docs or command output before implementation:
 
 - Exact command/cwd for rendering an external project workflow.
-- Whether `bunx smithers-orchestrator graph <workflow>` supports machine-readable output or needs adapter parsing.
+- Whether `bunx smthrs graph <workflow>` supports machine-readable output or needs adapter parsing.
 - Whether graph render creates no DB/log run state.
 - Exact run command and how to capture `runId`.
 - How to query Smithers run status/list/logs canonically.

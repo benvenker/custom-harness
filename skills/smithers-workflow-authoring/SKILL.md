@@ -25,10 +25,10 @@ Smithers docs/source anchors:
   - lines 6740-6787: `workflow run` / `up` behavior
   - lines 6927-6934: `graph` command
   - lines 7071-7096: workflow create/list/path behavior
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/cli/src/workflows.js`
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/cli/src/index.js`
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/engine/src/engine.js`
-- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/graph/src/types.ts`
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/cli/src/workflows.js`
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/cli/src/index.js`
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/engine/src/engine.js`
+- `/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/graph/src/types.ts`
 
 Official docs:
 
@@ -68,8 +68,8 @@ Prefer Smithers scaffolding:
 
 ```bash
 cd <project>
-bunx smithers-orchestrator init
-bunx smithers-orchestrator workflow create <workflow-id>
+bunx smthrs init
+bunx smthrs workflow create <workflow-id>
 ```
 
 Then edit ordinary Smithers files, for example:
@@ -86,9 +86,9 @@ The workflow spec is documentation/provenance, not runtime state.
 Run from the Smithers project root, not from `.smithers/`:
 
 ```bash
-bunx smithers-orchestrator workflow list --format json
-bunx smithers-orchestrator workflow path <workflow-id> --format json
-bunx smithers-orchestrator graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
+bunx smthrs workflow list --format json
+bunx smthrs workflow path <workflow-id> --format json
+bunx smthrs graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
 ```
 
 Render verification means no task execution and no Smithers run launch. It may still import workflow code and touch Smithers-owned DB/cache files.
@@ -96,7 +96,7 @@ Render verification means no task execution and no Smithers run launch. It may s
 Optional smoke run only when safe/useful:
 
 ```bash
-bunx smithers-orchestrator workflow run <workflow-id> --input '{}' --detach --format json
+bunx smthrs workflow run <workflow-id> --input '{}' --detach --format json
 ```
 
 ## Repair loop

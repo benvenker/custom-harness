@@ -81,8 +81,8 @@ docs/adr/0003-reflect-smithers-first-smooth-with-overlays.md
 
 ```txt
 /Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt
-/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smithers-orchestrator/
-/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/smithers-orchestrator/
+/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/@smthrs/
+/Users/ben/code/agents/smithers/code-review/.smithers/node_modules/smthrs/
 ```
 
 Important anchors:
@@ -98,10 +98,10 @@ docs/smithersai-smithers.txt:7071-7096    workflow create/list/path behavior
 Useful source files:
 
 ```txt
-@smithers-orchestrator/cli/src/workflows.js
-@smithers-orchestrator/cli/src/index.js
-@smithers-orchestrator/engine/src/engine.js
-@smithers-orchestrator/graph/src/types.ts
+@smthrs/cli/src/workflows.js
+@smthrs/cli/src/index.js
+@smthrs/engine/src/engine.js
+@smthrs/graph/src/types.ts
 ```
 
 #### Official docs
@@ -169,8 +169,8 @@ Prefer Smithers scaffolding:
 
 ```bash
 cd <project>
-bunx smithers-orchestrator init
-bunx smithers-orchestrator workflow create <workflow-id>
+bunx smthrs init
+bunx smthrs workflow create <workflow-id>
 ```
 
 Then edit ordinary Smithers files:
@@ -194,7 +194,7 @@ Run from the project root.
 
 ```bash
 cd <project>
-bunx smithers-orchestrator workflow list --format json
+bunx smthrs workflow list --format json
 ```
 
 Confirms Smithers discovers the workflow.
@@ -203,7 +203,7 @@ Confirms Smithers discovers the workflow.
 
 ```bash
 cd <project>
-bunx smithers-orchestrator workflow path <workflow-id> --format json
+bunx smthrs workflow path <workflow-id> --format json
 ```
 
 Confirms the workflow ID resolves to the intended file.
@@ -212,7 +212,7 @@ Confirms the workflow ID resolves to the intended file.
 
 ```bash
 cd <project>
-bunx smithers-orchestrator graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
+bunx smthrs graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
 ```
 
 Confirms Smithers can render the graph without executing tasks.
@@ -237,7 +237,7 @@ Only when safe/useful:
 
 ```bash
 cd <project>
-bunx smithers-orchestrator workflow run <workflow-id> --input '{}' --detach --format json
+bunx smthrs workflow run <workflow-id> --input '{}' --detach --format json
 ```
 
 The default verification is graph render. Smoke run is optional because it may spend model/API/tool resources.
@@ -279,8 +279,8 @@ Suggested contents:
 
 | Command | Exit | Result |
 |---|---:|---|
-| `bunx smithers-orchestrator workflow list --format json` | 0 | workflow discovered |
-| `bunx smithers-orchestrator graph ...` | 0 | graph rendered |
+| `bunx smthrs workflow list --format json` | 0 | workflow discovered |
+| `bunx smthrs graph ...` | 0 | graph rendered |
 
 ## Repair attempts
 
@@ -547,7 +547,7 @@ Assertions:
 GREEN:
 
 - Add missing-Smithers handling.
-- Do not call `smithers-orchestrator init` from passive viewer endpoints.
+- Do not call `smthrs init` from passive viewer endpoints.
 
 Validation:
 
@@ -716,7 +716,7 @@ Validation command to spike:
 
 ```bash
 cd <project>
-bunx smithers-orchestrator workflow run <workflow-id> --input '{}' --detach --format json
+bunx smthrs workflow run <workflow-id> --input '{}' --detach --format json
 ```
 
 ### Slice 9 — UI consumes project workflow APIs
@@ -803,10 +803,10 @@ Before wiring real render/run, verify these once and record results in the plan/
 From a Smithers project root:
 
 ```bash
-bunx smithers-orchestrator workflow list --format json
-bunx smithers-orchestrator workflow path <workflow-id> --format json
-bunx smithers-orchestrator graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
-bunx smithers-orchestrator workflow run <workflow-id> --input '{}' --detach --format json
+bunx smthrs workflow list --format json
+bunx smthrs workflow path <workflow-id> --format json
+bunx smthrs graph .smithers/workflows/<workflow-id>.tsx --input '{}' --format json
+bunx smthrs workflow run <workflow-id> --input '{}' --detach --format json
 ```
 
 Record:

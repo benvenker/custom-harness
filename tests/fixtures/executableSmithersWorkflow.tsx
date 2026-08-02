@@ -1,5 +1,5 @@
 import React from 'react';
-import { createSmithers } from 'smithers-orchestrator';
+import { createSmithers } from 'smthrs';
 import { z } from 'zod';
 
 const schemas = {

@@ -55,10 +55,10 @@ Verified repo facts:
   - `tests/runSmithersWorkflow.test.ts`
   - `tests/renderWorkflowGraph.test.ts`
 - No `src/smithersProject/` module currently exists.
-- Local Smithers DB APIs are inspectable in `node_modules/@smithers-orchestrator/db`.
-  - `SmithersDb` exists at `@smithers-orchestrator/db/adapter`.
+- Local Smithers DB APIs are inspectable in `node_modules/@smthrs/db`.
+  - `SmithersDb` exists at `@smthrs/db/adapter`.
   - Read APIs include `getRun`, `listRuns`, `listNodes`, `listAttemptsForRun`, `listEvents`, `listEventHistory`, `getLastFrame`, `getRawNodeOutputForIteration`.
-  - CLI `openSmithersDb()` in `node_modules/@smithers-orchestrator/cli/src/find-db.js` calls `ensureSmithersTables()`, so it is not suitable for read-only inspection.
+  - CLI `openSmithersDb()` in `node_modules/@smthrs/cli/src/find-db.js` calls `ensureSmithersTables()`, so it is not suitable for read-only inspection.
 
 ## Global Drift Tripwires
 
@@ -76,7 +76,7 @@ bun test tests/workflowViewer.run.test.ts
 # -> 400 PROJECT_MODE_PROMPT_OVERRIDES_UNSUPPORTED
 
 # Reader code must not import/call schema mutators.
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 
 # Read-only opener write probe must fail.
 # tests/smithersRunReader.test.ts should attempt INSERT, CREATE TABLE, DROP TABLE, write PRAGMA
@@ -190,7 +190,7 @@ serial only — this task defines the shared reader contract and DTO names consu
 ```bash
 bun test tests/smithersRunReader.test.ts
 bun tsc --noEmit
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 ```
 
 #### Drift tripwires
@@ -1070,7 +1070,7 @@ parallel after Task 6 — final integration/guard task should run after feature 
 bun test tests/smithersRunReader.test.ts tests/workflowViewer.run.test.ts tests/workflowViewer.run.integration.test.ts tests/workflowViewer.ui.test.ts tests/server.test.ts
 bun test tests/
 bun tsc --noEmit
-rg -n "from ['\"]@smithers-orchestrator/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
+rg -n "from ['\"]@smthrs/db/ensure|ensureSmithersTables\(|ensureSqlMessageStorage\(|ensureSchema\(" src/smithersProject
 rg -n "\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b.*_smithers|_smithers_.*\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b" src/smithersProject src/server.ts
 ```
 

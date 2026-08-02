@@ -36,5 +36,5 @@ export function buildSmithersWorkflowRunCommand(options: {
     return { cmd: ['bun', workflowPackLocalBin, ...runArgs], cwd: projectRoot, source: 'workflow-pack-local' };
   }
 
-  return { cmd: ['bunx', 'smithers-orchestrator', ...runArgs], cwd: projectRoot, source: 'bunx' };
+  return { cmd: ['bunx', 'smthrs', ...runArgs], cwd: projectRoot, source: 'bunx' };
 }

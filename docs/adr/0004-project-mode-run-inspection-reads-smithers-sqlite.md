@@ -30,13 +30,13 @@ The installed DB schema creates the run-state tables CustomHarness needs to read
 - `_smithers_frames` for frame snapshots.
 - `_smithers_events` for event history.
 
-Source: `node_modules/@smithers-orchestrator/db/src/sql-message-storage.js:13-76` and `:205-211`.
+Source: `node_modules/@smthrs/db/src/sql-message-storage.js:13-76` and `:205-211`.
 
-`runWorkflow` writes input rows and inserts/updates `_smithers_runs` through the Smithers DB adapter. Source: `node_modules/@smithers-orchestrator/engine/src/engine.js:4938-5050`.
+`runWorkflow` writes input rows and inserts/updates `_smithers_runs` through the Smithers DB adapter. Source: `node_modules/@smthrs/engine/src/engine.js:4938-5050`.
 
-Smithers resolves default log output separately from DB state. `resolveLogDir` defaults to `<rootDir>/.smithers/executions/<runId>/logs`, and `EventBus.persistLog` writes `stream.ndjson` there when logging is enabled. Sources: `node_modules/@smithers-orchestrator/engine/src/engine.js:1248-1274` and `node_modules/@smithers-orchestrator/engine/src/events.js:176-205`.
+Smithers resolves default log output separately from DB state. `resolveLogDir` defaults to `<rootDir>/.smithers/executions/<runId>/logs`, and `EventBus.persistLog` writes `stream.ndjson` there when logging is enabled. Sources: `node_modules/@smthrs/engine/src/engine.js:1248-1274` and `node_modules/@smthrs/engine/src/events.js:176-205`.
 
-Smithers already exposes DB-backed inspection surfaces. `ps` opens the nearest DB via `findAndOpenDb()` and returns JSON-capable run rows. Source: `node_modules/@smithers-orchestrator/cli/src/index.js:2648-2701`. DB discovery/opening helpers are available in `node_modules/@smithers-orchestrator/cli/src/find-db.js:1-83`.
+Smithers already exposes DB-backed inspection surfaces. `ps` opens the nearest DB via `findAndOpenDb()` and returns JSON-capable run rows. Source: `node_modules/@smthrs/cli/src/index.js:2648-2701`. DB discovery/opening helpers are available in `node_modules/@smthrs/cli/src/find-db.js:1-83`.
 
 Existing project decisions already require this direction:
 

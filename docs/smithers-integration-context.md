@@ -6,7 +6,7 @@ Primary Smithers reference material currently lives at:
 
 - `/Users/ben/code/agents/smithers/code-review/docs/smithersai-smithers.txt`
 
-Read that file, plus the installed package source under `node_modules/@smithers-orchestrator/`, before changing Smithers workflow rendering, execution, run inspection, frame handling, or SQLite integration. Prefer Smithers package/adapter read APIs when they exist; use centralized read-only SQL only for Smithers state that the installed package does not expose.
+Read that file, plus the installed package source under `node_modules/@smthrs/`, before changing Smithers workflow rendering, execution, run inspection, frame handling, or SQLite integration. Prefer Smithers package/adapter read APIs when they exist; use centralized read-only SQL only for Smithers state that the installed package does not expose.
 
 ## Role of Smithers
 
